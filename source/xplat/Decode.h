@@ -33,8 +33,9 @@ struct DecodedInstruction {
 	 */
 	Opcode Op;
 	/*
-	 * The condition code for an ARM instruction, or 0xE (1110 binary) for
+	 * The condition code for an ARM instruction, or CONDITION_AL for
 	 * Thumb instructions that don't have a condition code.
+	 * This field stores one of the members of 'enum ARMCondition'.
 	 */
 	u8 Condition;
 	/*
@@ -51,6 +52,11 @@ struct DecodedInstruction {
 	 * Bit 0 = V (oVerflow)
 	 */
 	u8 FlagsModified;
+	/*
+	 * The flags required by the instruction for its operation, in the
+	 * same order as FlagsModified.
+	 */
+	u8 FlagsRequired;
 	/*
 	 * The registers used by a register-list instruction.
 	 */
@@ -123,4 +129,40 @@ enum ARMAndThumbOpcodes {
 	OPCODE_SWP                     /* ARM */,
 	OPCODE_TEQ                     /* ARM */,
 	OPCODE_TST                     /* ARM and Thumb */,
+};
+
+enum ARMCondition {
+	/* EQ (EQual): Z == 1 */
+	CONDITION_EQ,
+	/* NE (Not Equal): Z == 0 */
+	CONDITION_NE,
+	/* CS (Carry Set): C == 1 */
+	CONDITION_CS,
+	/* CC (Carry Clear): C == 0 */
+	CONDITION_CC,
+	/* MI (MInus): N == 1 */
+	CONDITION_MI,
+	/* PL (PLus): N == 0 */
+	CONDITION_PL,
+	/* VS (oVerflow Set): V == 1 */
+	CONDITION_VS,
+	/* VC (oVerflow Clear): V == 0 */
+	CONDITION_VC,
+	/* HI (unsigned HIgher): C == 1 && Z == 0 */
+	CONDITION_HI,
+	/* LS (unsigned Lower or Same): C == 0 || Z == 1 */
+	CONDITION_LS,
+	/* GE (Greater than or Equal): N == V */
+	CONDITION_GE,
+	/* LT (Less Than): N != V */
+	CONDITION_LT,
+	/* GT (Greater Than): Z == 0 && N == V */
+	CONDITION_GT,
+	/* LE (Less than or Equal): Z == 1 || N != V */
+	CONDITION_LE,
+	/* AL (ALl) */
+	CONDITION_AL,
+	/* 0xF is reserved and must not be used.
+	 * (ARM Instruction Set, section 4.2, "The Condition Field") */
+	CONDITION_RESERVED
 };
