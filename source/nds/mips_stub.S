@@ -543,35 +543,159 @@ mips_indirect_branch_dual:
 
 
 mips_get_metadata_arm:
-  addiu $sp, $sp, -4
-  sw $ra, 0($sp)
-  save_registers
-  jal get_metadata_arm
+  srl  $1, $4, 24                 # $1 = memory region of $4
+  ori  $2, $0, 3
+  beq  $1, $2, 3f                 # is it 3 (IWRAM)?
+  ori  $2, $0, 2                  # preload next attempt (branch delay slot)
+  beq  $1, $2, 2f                 # is it 2 (EWRAM)?
+  ori  $2, $0, 6                  # preload next attempt (branch delay slot)
+  beq  $1, $2, 6f                 # is it 6 (VRAM)?
   nop                             # cannot delay usefully here
 
-  restore_registers
-  lw $ra, 0($sp)
-  jr $ra
-  addiu $sp, $sp, 4
+  jr   $ra                        # it's not a writable area
+  move $2, $0                     # load the return value as 0 (branch delay)
+
+2: # EWRAM (18 address bits)
+  li   $6, 0x3FFFC
+  and  $5, $4, $6                 # $5 = pc & 0x3FFFC
+  sll  $5, $5, 1                  #     (            ) << 1 (u16 addr)
+  la   $6, ewram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x3FFFC]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 2($6)                  # return metadata+(pc & 0x3FFFC)[1]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 2($6)                  # return metadata+(pc & 0x3FFFC)[1] (delay)
+#endif
+
+3: # IWRAM (15 address bits)
+  andi $5, $4, 0x7FFC             # $5 = pc & 0x7FFC
+  sll  $5, $5, 1                  #     (            ) << 1 (u16 addr)
+  la   $6, iwram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x7FFC]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 2($6)                  # return metadata+(pc & 0x7FFC)[1]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 2($6)                  # return metadata+(pc & 0x7FFC)[1] (delay)
+#endif
+
+6: # VRAM (17 address bits, 128 KiB, last 32 KiBs are mirrors of each other)
+  lui  $6, 1
+  and  $1, $4, $6
+  beq  $4, $6, 10f                # if (pc & 0x10000) goto 10 forward
+  andi $5, $4, 0xFFFC             # else $5 = pc & 0xFFFC lower 64 KiB (delay)
+  sll  $5, $5, 1                  #          (           ) << 1 (u16 addr)
+  la   $6, vram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0xFFFC]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 2($6)                  # return metadata+(pc & 0xFFFC)[1]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 2($6)                  # return metadata+(pc & 0xFFFC)[1] (delay)
+#endif
+
+10: # VRAM (last 32 KiB mirrors)
+  ori  $6, $6, 0x7FFC             # $6 was 0x10000 above, load it with 0x17FFC
+  and  $5, $4, $6                 # else $5 = pc & 0x17FFC
+  sll  $5, $5, 1                  #          (            ) << 1 (u16 addr)
+  la   $6, vram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x17FFC]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 2($6)                  # return metadata+(pc & 0x17FFC)[1]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 2($6)                  # return metadata+(pc & 0x17FFC)[1] (delay)
+#endif
 
 mips_get_metadata_thumb:
-  addiu $sp, $sp, -4
-  sw $ra, 0($sp)
-  save_registers
-  jal get_metadata_thumb
+  srl  $1, $4, 24                 # $1 = memory region of $4
+  ori  $2, $0, 3
+  beq  $1, $2, 3f                 # is it 3 (IWRAM)?
+  ori  $2, $0, 2                  # preload next attempt (branch delay slot)
+  beq  $1, $2, 2f                 # is it 2 (EWRAM)?
+  ori  $2, $0, 6                  # preload next attempt (branch delay slot)
+  beq  $1, $2, 6f                 # is it 6 (VRAM)?
   nop                             # cannot delay usefully here
 
-  restore_registers
-  lw $ra, 0($sp)
-  jr $ra
-  addiu $sp, $sp, 4
+  jr   $ra                        # it's not a writable area
+  move $2, $0                     # load the return value as 0 (branch delay)
+
+2: # EWRAM (18 address bits)
+  li   $6, 0x3FFFE
+  and  $5, $4, $6                 # $5 = pc & 0x3FFFE
+  sll  $5, $5, 1                  #     (            ) << 1 (u16 addr)
+  la   $6, ewram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x3FFFE]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 0($6)                  # return metadata[pc & 0x3FFFE]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 0($6)                  # return metadata[pc & 0x3FFFE] (delay)
+#endif
+
+3: # IWRAM (15 address bits)
+  andi $5, $4, 0x7FFE             # $5 = pc & 0x7FFE
+  sll  $5, $5, 1                  #     (            ) << 1 (u16 addr)
+  la   $6, iwram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x7FFE]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 0($6)                  # return metadata[pc & 0x7FFE]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 0($6)                  # return metadata[pc & 0x7FFE] (delay)
+#endif
+
+6: # VRAM (17 address bits, 128 KiB, last 32 KiBs are mirrors of each other)
+  lui  $6, 1
+  and  $1, $4, $6
+  beq  $4, $6, 10f                # if (pc & 0x10000) goto 10 forward
+  andi $5, $4, 0xFFFE             # else $5 = pc & 0xFFFE lower 64 KiB (delay)
+  sll  $5, $5, 1                  #          (           ) << 1 (u16 addr)
+  la   $6, vram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0xFFFE]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 0($6)                  # return metadata[pc & 0xFFFE]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 0($6)                  # return metadata[pc & 0xFFFE] (delay)
+#endif
+
+10: # VRAM (last 32 KiB mirrors)
+  ori  $6, $6, 0x7FFE             # $6 was 0x10000 above, load it with 0x17FFE
+  and  $5, $4, $6                 # else $5 = pc & 0x17FFE
+  sll  $5, $5, 1                  #          (            ) << 1 (u16 addr)
+  la   $6, vram_metadata
+  add  $6, $6, $5                 # $6 = &metadata[pc & 0x17FFE]
+#ifndef NO_LOAD_DELAY_SLOT
+  lw   $2, 0($6)                  # return metadata[pc & 0x17FFE]
+  jr   $ra                        # to the caller
+  nop                             # delay for both things
+#else
+  jr   $ra                        # to the caller
+  lh   $2, 0($6)                  # return metadata[pc & 0x17FFE] (delay)
+#endif
 
 mips_partial_flush_ram:
   addiu $sp, $sp, -4
   sw $ra, 0($sp)
-  save_registers
+  save_most_registers
   jal partial_flush_ram
-  nop                             # cannot delay usefully here
+  save_register_30                # finish saving regs (branch delay)
 
   restore_registers
   lw $ra, 0($sp)
