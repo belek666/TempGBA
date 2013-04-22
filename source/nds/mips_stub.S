@@ -1469,7 +1469,7 @@ mips_partial_flush_ram:
   la  $5, \metabase
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
-  srl $1, $1, (30 - \addr_bits)   #   discards lowest 2 bits
+  srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
   sll $1, $1, 2                   #   puts them back into place
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
@@ -1481,6 +1481,7 @@ mips_partial_flush_ram:
   # Also write 0xFFFF to [0] or [2], causing a flush of the appropriate
   # Thumb instruction if it's executed as code later.
   andi $2, $4, 2
+  sll  $2, $2, 1
   add  $5, $5, $2
   jr   $ra
   sh   $1, 0($5)                  # (branch delay slot)
@@ -1494,7 +1495,7 @@ mips_partial_flush_ram:
   la  $5, \metabase
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
-  srl $1, $1, (30 - \addr_bits)   #   discards lowest 2 bits
+  srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
   sll $1, $1, 2                   #   puts them back into place
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
@@ -1506,6 +1507,7 @@ mips_partial_flush_ram:
   # Also write 0xFFFF to [0] or [2], causing a flush of the appropriate
   # Thumb instruction if it's executed as code later.
   andi $2, $4, 2
+  sll  $2, $2, 1
   add  $5, $5, $2
   jr   $ra
   sh   $1, 0($5)                  # (branch delay slot)
@@ -1519,7 +1521,7 @@ mips_partial_flush_ram:
   la  $5, \metabase
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
-  srl $1, $1, (30 - \addr_bits)   #   discards lowest 2 bits
+  srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
   sll $1, $1, 2                   #   puts them back into place
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
