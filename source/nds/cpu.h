@@ -95,6 +95,8 @@ typedef enum
   TRANSLATION_REGION_BIOS
 } TRANSLATION_REGION_TYPE;
 
+#define TRANSLATION_REGION_COUNT 5
+
 typedef enum
 {
   /* All caches are being initialised during emulator startup. */
@@ -112,6 +114,8 @@ typedef enum
    * been loaded. */
   FLUSH_REASON_LOADING_STATE
 } CODE_CACHE_FLUSH_REASON;
+
+#define CODE_CACHE_FLUSH_REASON_COUNT 6
 
 u32 execute_load_u8(u32 address);
 u32 execute_load_u16(u32 address);

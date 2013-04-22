@@ -22,15 +22,11 @@ struct GPSP_STATS {
 	/* Performance statistics collectors. This set does not impact
 	 * performance of the emulator much. */
 	/* How many bytes of MIPS code have we discarded since the current
-	 * game started running? */
-	u32	ROMTranslationBytesFlushed;
-	u32	RAMTranslationBytesFlushed;
-	u32	BIOSTranslationBytesFlushed;
+	 * game started running, in which caches? */
+	u32	TranslationBytesFlushed[TRANSLATION_REGION_COUNT];
 	/* How many times have we had to discard MIPS code since the current
-	 * game started running? */
-	u32	ROMTranslationFlushCount;
-	u32	RAMTranslationFlushCount;
-	u32	BIOSTranslationFlushCount;
+	 * game started running, in which caches, and for which reasons? */
+	u32	TranslationFlushCount[TRANSLATION_REGION_COUNT][CODE_CACHE_FLUSH_REASON_COUNT];
 	/* How many times have we detected an underrun of the sound buffer? */
 	u32	SoundBufferUnderrunCount;
 	/* How many frames have we emulated since the current game started
@@ -41,9 +37,7 @@ struct GPSP_STATS {
 	/* Performance statistics collectors. This set impacts normal
 	 * performance of the emulator. */
 	/* Up to how many bytes of MIPS code must we hold for this game? */
-	u32	ROMTranslationBytesPeak;
-	u32	RAMTranslationBytesPeak;
-	u32	BIOSTranslationBytesPeak;
+	u32	TranslationBytesPeak[TRANSLATION_REGION_COUNT];
 	/* How many times have we had to decode an ARM or a Thumb opcode from
 	 * scratch since the current game started running? */
 	u32	ARMOpcodesDecoded;

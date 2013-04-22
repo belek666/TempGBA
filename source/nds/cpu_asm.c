@@ -2850,17 +2850,24 @@ u32     recursion_level= 0;
 extern void ARMBadJump(unsigned int SourcePC, unsigned int TargetPC);
 
 #ifdef PERFORMANCE_IMPACTING_STATISTICS
-static inline void AdjustTranslationBufferPeaks()
+static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translation_region)
 {
-	if (Stats.ROMTranslationBytesPeak < rom_next_code - rom_code_cache)
-		Stats.ROMTranslationBytesPeak = rom_next_code - rom_code_cache;
-	if (Stats.RAMTranslationBytesPeak < ram_next_code - ram_code_cache)
-		Stats.RAMTranslationBytesPeak = ram_next_code - ram_code_cache;
-	if (Stats.BIOSTranslationBytesPeak < bios_next_code - bios_code_cache)
-		Stats.BIOSTranslationBytesPeak = bios_next_code - bios_code_cache;
+	u32 OldPeak = Stats.TranslationBytesPeak[translation_region];
+	u32 NewPeak;
+	switch (translation_region)
+	{
+		case TRANSLATION_REGION_IWRAM: NewPeak = iwram_next_code - iwram_code_cache; break;
+		case TRANSLATION_REGION_EWRAM: NewPeak = ewram_next_code - ewram_code_cache; break;
+		case TRANSLATION_REGION_VRAM:  NewPeak = vram_next_code  - vram_code_cache;  break;
+		case TRANSLATION_REGION_ROM:   NewPeak = rom_next_code   - rom_code_cache;   break;
+		case TRANSLATION_REGION_BIOS:  NewPeak = bios_next_code  - bios_code_cache;  break;
+		default:                       NewPeak = 0;                                  break;
+	}
+	if (NewPeak > OldPeak)
+		Stats.TranslationBytesPeak[translation_region] = NewPeak;
 }
 #else
-static inline void AdjustTranslationBufferPeaks() {}
+static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translation_region) {}
 #endif
 
 // Where emulation started
@@ -2886,16 +2893,19 @@ static inline void AdjustTranslationBufferPeaks() {}
       block_lookup_translate(type, bios, 0);                                  \
       if(translation_recursion_level == 0)                                    \
         bios_region_read_allow();                                             \
+      AdjustTranslationBufferPeak(TRANSLATION_REGION_BIOS);                   \
       break;                                                                  \
                                                                               \
     case 0x2:                                                                 \
       metadata = ewram_metadata + (pc & 0x3FFFC);                             \
       block_lookup_translate(type, ewram, 1);                                 \
+      AdjustTranslationBufferPeak(TRANSLATION_REGION_EWRAM);                  \
       break;                                                                  \
                                                                               \
     case 0x3:                                                                 \
       metadata = iwram_metadata + (pc & 0x7FFC);                              \
       block_lookup_translate(type, iwram, 1);                                 \
+      AdjustTranslationBufferPeak(TRANSLATION_REGION_IWRAM);                  \
       break;                                                                  \
                                                                               \
     case 0x6:                                                                 \
@@ -2904,6 +2914,7 @@ static inline void AdjustTranslationBufferPeaks() {}
       else /* first 64 KiB */                                                 \
         metadata = vram_metadata + (pc & 0xFFFC);                             \
       block_lookup_translate(type, vram, 1);                                  \
+      AdjustTranslationBufferPeak(TRANSLATION_REGION_VRAM);                   \
       break;                                                                  \
                                                                               \
     case 0x8 ... 0xD:                                                         \
@@ -2954,6 +2965,7 @@ static inline void AdjustTranslationBufferPeaks() {}
         /* if(translation_recursion_level == 0)                                  \
           translate_invalidate_dcache(); */                                      \
       }                                                                       \
+      AdjustTranslationBufferPeak(TRANSLATION_REGION_ROM);                    \
       break;                                                                  \
     }                                                                         \
                                                                               \
@@ -2983,7 +2995,6 @@ static inline void AdjustTranslationBufferPeaks() {}
 {\
     dump_translation_cache(); \
 }*/\
-  AdjustTranslationBufferPeaks();                                             \
   return block_address;                                                       \
 }                                                                             \
 
@@ -3805,6 +3816,7 @@ u16 get_metadata_thumb(u32 address)
 void flush_translation_cache(TRANSLATION_REGION_TYPE translation_region,
   CODE_CACHE_FLUSH_REASON flush_reason)
 {
+	Stats.TranslationFlushCount[translation_region][flush_reason]++;
 	switch (translation_region)
 	{
 		case TRANSLATION_REGION_ROM:
@@ -3949,21 +3961,40 @@ void partial_flush_ram(u32 address)
 	}
 }
 
-unsigned int last_ram= 0;
+unsigned int last_iwram= 0;
+unsigned int last_ewram= 0;
+unsigned int last_vram= 0;
 unsigned int last_rom= 0;
 unsigned int last_bios= 0;
 void dump_translation_cache()
 {
-#if 0 /* Currently disabled [Neb] */
 //  FILE_OPEN(FILE *fp, "fat:/ram_cache.bin", WRITE);
 	FILE *fp;
-if(last_ram != (ram_next_code - ram_code_cache))
+if(last_iwram != (iwram_next_code - iwram_code_cache))
 {
-  fp = fopen("fat:/ram_cache.bin", "wb");
-  fwrite(ram_code_cache, 1, ram_next_code - ram_code_cache, fp);
+  fp = fopen("fat:/iwram_cache.bin", "wb");
+  fwrite(iwram_code_cache, 1, iwram_next_code - iwram_code_cache, fp);
   fclose(fp);
 
-  last_ram = ram_next_code - ram_code_cache;
+  last_iwram = iwram_next_code - iwram_code_cache;
+}
+
+if(last_ewram != (ewram_next_code - ewram_code_cache))
+{
+  fp = fopen("fat:/ewram_cache.bin", "wb");
+  fwrite(ewram_code_cache, 1, ewram_next_code - ewram_code_cache, fp);
+  fclose(fp);
+
+  last_ewram = ewram_next_code - ewram_code_cache;
+}
+
+if(last_vram != (vram_next_code - vram_code_cache))
+{
+  fp = fopen("fat:/vram_cache.bin", "wb");
+  fwrite(vram_code_cache, 1, vram_next_code - vram_code_cache, fp);
+  fclose(fp);
+
+  last_vram = vram_next_code - vram_code_cache;
 }
 
 if(last_rom != (rom_next_code - rom_code_cache))
@@ -3987,8 +4018,7 @@ if(last_bios != (bios_next_code - bios_code_cache))
 /*  char print_buffer[256];
   sprintf(print_buffer, "RAM:%08X ROM:%08X BIOS:%08X", ram_next_code - ram_code_cache, rom_next_code - rom_code_cache, bios_next_code - bios_code_cache);
   PRINT_STRING_BG(print_buffer, 0xFFFF, 0x000, 0, 10);*/
-  printf("RAM:%08X ROM:%08X BIOS:%08X \n", ram_next_code - ram_code_cache, rom_next_code - rom_code_cache, bios_next_code - bios_code_cache);
-#endif
+  printf("IWRAM:%08X EWRAM:%08X VRAM:%08X ROM:%08X BIOS:%08X \n", iwram_next_code - iwram_code_cache, ewram_next_code - ewram_code_cache, vram_next_code - vram_code_cache, rom_next_code - rom_code_cache, bios_next_code - bios_code_cache);
 }
 
 void init_cpu() 
