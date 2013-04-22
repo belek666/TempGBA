@@ -2780,7 +2780,7 @@ u32 bios_block_tag_top = MIN_TAG;
   ((thumb) ? (get_tag_thumb()) : (get_tag_arm()))                             \
 
 #define fill_tag_arm(mem_type)                                                \
-  metadata[1] = mem_type##_block_tag_top;                                     \
+  metadata[1] = mem_type##_block_tag_top                                      \
 
 #define fill_tag_thumb(mem_type)                                              \
   metadata[pc & 2] = mem_type##_block_tag_top                                 \
@@ -2800,14 +2800,11 @@ u32 bios_block_tag_top = MIN_TAG;
                                                                               \
     redo:                                                                     \
                                                                               \
-    translation_recursion_level++;                                            \
     if (mem_type##_block_tag_top > MAX_TAG) {                                 \
-      if(translation_recursion_level)                                         \
-        return NULL;                                                          \
-                                                                              \
       flush_translation_cache(mem_type##_translation_region,                  \
         FLUSH_REASON_LAST_TAG);                                               \
     }                                                                         \
+    translation_recursion_level++;                                            \
     block_address = mem_type##_next_code + block_prologue_size;         \
     mem_type##_native_addrs[mem_type##_block_tag_top] = block_address;        \
     fill_tag_##instruction_type(mem_type);                                    \
@@ -3531,7 +3528,8 @@ s32 translate_block_##type(u32 pc, TRANSLATION_REGION_TYPE                    \
                                                                               \
     case TRANSLATION_REGION_BIOS:                                             \
       translation_ptr = bios_next_code;                                       \
-      translation_cache_limit = bios_code_cache +                             \
+      translation_cache_limit =                                               \
+        bios_code_cache + BIOS_CODE_CACHE_SIZE -                              \
         CODE_CACHE_SOFT_LIMIT;                                                \
       break;                                                                  \
   }                                                                           \
@@ -3815,6 +3813,12 @@ void flush_translation_cache(TRANSLATION_REGION_TYPE translation_region,
 			if (flush_reason != FLUSH_REASON_NATIVE_LINK)
 				flush_translation_cache(TRANSLATION_REGION_BIOS,
 					FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_IWRAM,
+				FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_EWRAM,
+				FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_VRAM,
+				FLUSH_REASON_NATIVE_LINK);
 			break;
 		case TRANSLATION_REGION_BIOS:
 			bios_next_code = bios_code_cache;
@@ -3823,6 +3827,12 @@ void flush_translation_cache(TRANSLATION_REGION_TYPE translation_region,
 			if (flush_reason != FLUSH_REASON_NATIVE_LINK)
 				flush_translation_cache(TRANSLATION_REGION_ROM,
 					FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_IWRAM,
+				FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_EWRAM,
+				FLUSH_REASON_NATIVE_LINK);
+			flush_translation_cache(TRANSLATION_REGION_VRAM,
+				FLUSH_REASON_NATIVE_LINK);
 			break;
 		case TRANSLATION_REGION_IWRAM:
 			iwram_next_code = iwram_code_cache;
