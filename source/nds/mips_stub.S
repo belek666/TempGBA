@@ -1470,7 +1470,7 @@ mips_partial_flush_ram:
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
   srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
-  sll $1, $1, 2                   #   puts them back into place
+  sll $1, $1, 3                   #   puts them back into place, -> u16 ptr
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
   # Whatever happens, [1] = 0xFFFF, causing a flush of an ARM instruction if
@@ -1496,7 +1496,7 @@ mips_partial_flush_ram:
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
   srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
-  sll $1, $1, 2                   #   puts them back into place
+  sll $1, $1, 3                   #   puts them back into place, -> u16 ptr
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
   # Whatever happens, [1] = 0xFFFF, causing a flush of an ARM instruction if
@@ -1522,7 +1522,7 @@ mips_partial_flush_ram:
   sub $4, $2, $4                  # regenerate the offset: $4 = addr - base
   sll $1, $4, (32 - \addr_bits)   # $1 = (($4 & ~3) & (size - 1)) << 1
   srl $1, $1, (34 - \addr_bits)   #   discards lowest 2 bits
-  sll $1, $1, 2                   #   puts them back into place
+  sll $1, $1, 3                   #   puts them back into place, -> u16 ptr
   add $5, $5, $1                  # $5 = &metabase[offset] (u16[])
 
   # The entire word has been trashed. [0..2] = 0xFFFF, causing a flush of an
