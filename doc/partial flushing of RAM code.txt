@@ -1,0 +1,171 @@
+C 2013-04-18 [Nebuleon]  Partial flushing of RAM code  M 2013-04-18 [Nebuleon]
+                                                         2013-04-18 [Normmatt]
+
+Alright. Here's my idea for partially flushing the translation buffer for
+writable areas.
+
+There are three writable areas in a Game Boy Advance's memory map, of which
+only the first two are supported in current "master gpSP" (as opposed to the
+experimental code):
+
+* The Internal Working RAM (IWRAM), 32 KiB of memory close to the ARM7TDMI
+  processor. This memory uses a 32-bit bus, so programmers are advised to
+  put ARM code here.
+* The External Working RAM (EWRAM), 256 KiB of memory that sits somewhat far
+  from the processor. This memory uses a 16-bit bus, so programmers are
+  advised to put Thumb code here.
+* The Video RAM (VRAM), 96 KiB of memory that uses a 16-bit bus, some of
+  which is unused for graphics depending on the Game Boy Advance's active
+  video mode.
+
+Of course, it is possible to place ARM code in EWRAM and VRAM (which would
+then be fetched twice too slow), and Thumb code in IWRAM (which would just
+waste the 32-bit bus).
+
+ARM and Thumb code may freely be mixed in the same memory line, and a piece
+of code may be both valid ARM and valid Thumb.
+
+To unify the implementation of block tags across all writable areas (and
+unfortunately the BIOS, as it also uses a block tag mechanism), as well as
+to allow this polyglot ARM-Thumb code to work properly, I wish to use tags
+to indicate the native code addresses of both ARM and Thumb code.
+
+My idea also combines detection of modified code from any source:
+* A routine in ROM that copies itself into RAM;
+* A routine in ROM that copies data into RAM;
+* A routine in RAM that copies from ROM into RAM;
+* A routine in RAM that rewrites code, or writes generated code, into RAM;
+* A DMA channel that writes into RAM.
+Unfortunately, this detection affects all writes to all writable areas, since
+it cannot be known a priori which writes are for data and which are for code
+(except, as a heuristic, asserting that writes of 32-bit words that are
+ Undefined Instructions in ARM, as well as 16-bit [half-]words that are
+ Undefined Instructions in Thumb, are data writes - such a possibility is not
+ considered here, due to how costly it would be to check each write, as well
+ as the fact that writes can be split across multiple instructions and the
+ fact that a 32-bit write would need to be both one Undefined Instruction in
+ ARM and TWO Undefined Instructions in Thumb).
+
+So read_memory(8), (16) and (32) will be outfitted with a write into a new
+metadata area separate from the 'iwram', 'ewram' and 'vram' variables, which
+I will henceforth refer to as a Metadata Area (original, huh?). To refer to
+the area which a Metadata Area describes with its tags, instead of writing
+"'iwram', 'ewram' or 'vram'", I will use the generic term Data Area.
+
+For each 32-bit word in a Data Area (the Data Word), the corresponding
+Metadata Area shall have four (4) 16-bit [half-]words (a Metadata Entry):
+
+  [ data | data | data | data | data |...]
+    ...is described by...
+  (me ta da ta|me ta da ta|me ta da ta|me ta da ta|me ta da ta|...)
+
+The four 16-bit [half-]words are written like an array, [half-]word 0 at the
+lowest address and 3 at the highest. All of them are interpreted as unsigned.
+
+* [0] contains the tag, which can be used as a lookup key in the native-code
+  address array, for the Thumb instruction in the first half of the Data Word.
+  If there is no such native code, because there has not been a branch to the
+  first half in Thumb mode, this is either 0000h or FFFFh.
+  Legal tags for this [half-]word to represent native code are 0001h to FFFEh.
+* [1] contains the tag for the ARM instruction in the Data Word.
+  If there is no such native code, because there has not been a branch to the
+  word in ARM mode, this is either 0000h or FFFFh.
+  Legal tags for this word to represent native code are 0001h to FFFEh.
+* [2] contains the tag for the Thumb instruction in the second half-word of
+  the Data Word.
+  If there is no such native code, because there has not been a branch to the
+  second half-word in Thumb mode, this is either 0000h or FFFFh.
+  Legal tags for this [half-]word to represent native code are 0001h to FFFEh.
+* [3] contains 0000h if the Data Word, or either half of it, is not currently
+  compiled in either ARM or Thumb mode, or 0001h if it is, even as part of a
+  larger basic block, and even if the Data Word has been modified since
+  compilation.
+
+The process of writing a word to a Data Area is thus as follows:
+* If writing a byte, [1] -> FFFFh, as well as:
+  [0] for bytes 0 or 1 (address & 3 < 2);
+  [2] for bytes 2 or 3 (address & 3 >= 2).
+* If writing a half-word, [1] -> FFFFh, as well as:
+  [0] for address & 3 == 0;
+  [2] for address & 3 == 2.
+* If writing a word, [0..2] -> FFFFh.
+Unaligned memory accesses shall modify parts as appropriate.
+
+With this, it becomes possible to check for modification, done by any means,
+of a word in a Data Area before executing it as code.
+* Branching towards a code block whose first instruction has been modified
+  forces a recompilation because its Metadata Entry states that its tag is
+  FFFFh, an invalid tag value.
+* Before each instruction after the first one in a block, the Metadata Entry
+  corresponding to the Data Word is consulted. If the instruction is being run
+  in ARM mode and [1] == FFFFh, or if the instruction is being run in Thumb
+  mode and either [0] or [2] as appropriate == FFFFh, then the instruction is
+  deemed to have been modified, and a Partial Flush must start, targetting the
+  entire Data Word.
+
+Compilation is also slightly modified:
+* Tags run from 0001h to FFFEh. Master gpSP allows tags from 0101h to FFFEh.
+  If the current tag, before being incremented, is FFFFh, a Full Flush is
+  forced, and its cause will be "Last Tag".
+* Compilation shall set the Metadata Entry of any Data Word it newly compiles:
+  It shall set [3] -> 0001h for a word it compiles wholly in ARM mode or
+  wholly or partially in Thumb mode. It shall not reset the modification
+  status of any word or half-word, so as to force a subset block to be
+  recompiled if an external block branches to an instruction that has been
+  modified via a tag that has not been modified:
+                                            0257h   vv Modified (FFFFh)
+     [External block]    [Start: ... | BEQ | MOV | SUBS | B Start]
+            \________________________________/|
+
+All of this to finally define a Partial Flush targetting a certain Data Word:
+* Load the GBA address of the Data Word into the first parameter register for
+  the platform (in the emitter).
+* Emit a call to partial_flush_ram, then a load of the Program Counter into
+  the first parameter register (plus 1 if running in Thumb mode), then a jump
+  (not a call) to ARCH_indirect_branch_dual. This code is guaranteed to stay
+  valid throughout the Partial Flush before the indirect GBA branch.
+  partial_flush_ram is a C function that will take care of the Partial Flush.
+* Start with the Metadata Entry for the specified Data Word. Pretend it was
+  never compiled and reset its modification status, by setting [0..3] ->
+  0000h.
+* Going to the left (and wrapping to the right if the memory is mirrored),
+  if the Metadata Entry for a Data Word has [3] == 0001h, reset its
+  modification and compilation status, by setting [0..3] -> 0000h. Stop at
+  the first Data Word whose Metadata Entry has [3] == 0000h. This is to flush
+  all native code that is a superset of the block which is being flushed:
+
+  [Start: MOV|SUBS|CMP|...|BEQ|SUB|B Start]
+                              [SUB|B Start] <- Flushing this
+
+* Going to the right (and wrapping to the left if the memory is mirrored),
+  repeat the above procedure. It is needed to go forward past the end of the
+  flushed block, because it is not known which block is being flushed. Its tag
+  has become FFFFh or 0000h, and the Data Word was not necessarily the first
+  instruction in its block either.
+* Return. The return address will be in the old emitted code, which will
+  reload the PC and perform an indirect branch to the instruction that should
+  have been executed. This will cause recompilation, which may perform a
+  Full Flush, whose cause is either "Last Tag" or "Full Cache", then a branch
+  will be made to the new code. Because no return address is inside the old
+  emitted code at that point, this is perfectly safe even with a Full Flush.
+
+Since that instruction will be the first of its block, it will not need to
+perform a check for modification. It may be a subset of a larger block, which
+will be recompiled separately. For example:
+
+  {Start: ? ? ?}              [SUB|B Start] <- Flushed this
+  [Start: MOV|SUBS|CMP|...|BEQ|SUB|B Start] <- At Start, not yet compiled
+
+This creates a few subset blocks, which should be small enough not to affect
+the Translation Cache in any meaningful way. I posit (without any proof, ha!)
+that attempting to split or join these subset blocks would cause more
+processing than simply recompiling the larger block and letting the smaller
+one (and its 1 tag, out of 65534 available) go unused.
+
+To accommodate the new modification check code written before every ARM or
+Thumb instruction as well as these subset blocks, and to cause fewer Full
+Flushes whose cause is "Full Cache", the Translation Cache needs to be made
+larger on all platforms. Full Flushes are unavoidable, but infrequent ones
+are comparable to Full GCs in garbage-collected runtime systems like Java[TM].
+
+Full Flushes merely need to set the entire Metadata Area to zero with memset.

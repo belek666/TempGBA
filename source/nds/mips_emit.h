@@ -30,6 +30,10 @@ void mips_indirect_branch_arm(u32 address);
 void mips_indirect_branch_thumb(u32 address);
 void mips_indirect_branch_dual(u32 address);
 
+u16 mips_get_metadata_arm(u32 address);
+u16 mips_get_metadata_thumb(u32 address);
+void mips_partial_flush_ram(u32 address);
+
 u32 execute_read_cpsr();
 u32 execute_read_spsr();
 void execute_swi(u32 pc);
@@ -2023,7 +2027,7 @@ u32 execute_store_cpsr_body(u32 _cpsr, u32 store_mask, u32 address)
   if((rn == REG_SP) && iwram_stack_optimize)                                  \
   {                                                                           \
     mips_emit_andi(reg_a1, reg_a2, 0x7FFC);                                   \
-    generate_load_imm(reg_a0, ((u32)(iwram + 0x8000)));                       \
+    generate_load_imm(reg_a0, ((u32)(iwram_data)));                           \
     mips_emit_addu(reg_a1, reg_a1, reg_a0);                                   \
                                                                               \
     for(i = 0; i < 16; i++)                                                   \
@@ -2167,7 +2171,7 @@ u32 execute_store_cpsr_body(u32 _cpsr, u32 store_mask, u32 address)
   if((rn == REG_SP) && iwram_stack_optimize)                                  \
   {                                                                           \
     mips_emit_andi(reg_a1, reg_a2, 0x7FFC);                                   \
-    generate_load_imm(reg_a0, ((u32)(iwram + 0x8000)));                       \
+    generate_load_imm(reg_a0, ((u32)(iwram_data)));                           \
     mips_emit_addu(reg_a1, reg_a1, reg_a0);                                   \
                                                                               \
     for(i = 0; i < 16; i++)                                                   \
@@ -2535,7 +2539,7 @@ u32 execute_store_cpsr_body(u32 _cpsr, u32 store_mask, u32 address)
   if((base_reg == REG_SP) && iwram_stack_optimize)                            \
   {                                                                           \
     mips_emit_andi(reg_a1, reg_a2, 0x7FFC);                                   \
-    generate_load_imm(reg_a0, ((u32)(iwram + 0x8000)));                       \
+    generate_load_imm(reg_a0, ((u32)(iwram_data)));                           \
     generate_add(reg_a1, reg_a0);                                             \
                                                                               \
     for(i = 0; i < 8; i++)                                                    \
@@ -2709,5 +2713,23 @@ extern unsigned int swi_hle_handle[0x2B][3];
 #define generate_update_pc_reg()                                              \
   generate_load_pc(reg_a0, pc);                                               \
   mips_emit_sw(reg_a0, reg_base, (REG_PC * 4))                                \
+
+#define generate_modification_check(type)                                     \
+  generate_load_imm(reg_a0, pc);                                              \
+  generate_function_call_swap_delay(mips_get_metadata_##type);                \
+  mips_emit_ori(reg_temp, reg_zero, 0xFFFF);                                  \
+  {                                                                           \
+    u8* modification_check_start = NULL;                                      \
+    /* If the metadata half-word isn't FFFFh, go to the end of the check */   \
+    mips_emit_b_filler(bne, mips_reg_v0, reg_temp, modification_check_start); \
+    mips_emit_nop();                                                          \
+    /* Otherwise, flush and go back to the very same instruction */           \
+    generate_load_imm(reg_a0, pc);                                            \
+    generate_function_call_swap_delay(mips_partial_flush_ram);                \
+    generate_load_imm(reg_a0, pc);                                            \
+    generate_indirect_branch_no_cycle_update(type);                           \
+    generate_branch_patch_conditional(modification_check_start,               \
+      translation_ptr);                                                       \
+  }                                                                           \
 
 #endif

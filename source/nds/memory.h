@@ -171,25 +171,52 @@ extern DMA_TRANSFER_TYPE dma[4];
 extern u8 savestate_write_buffer[];
 extern u8 *g_state_buffer_ptr;
 
-//#define USE_VRAM
-
-#ifndef USE_VRAM
 extern u16 palette_ram[512];
 extern u16 oam_ram[512];
 extern u16 io_registers[1024 * 16];
-extern u8 ewram[1024 * 256 * 2];
-extern u8 iwram[1024 * 32 * 2];
-extern u8 vram[1024 * 96 * 2];
-extern u8 bios_rom[0x8000];
+extern u8 ewram_data[1024 * 256];
+extern u8 iwram_data[1024 * 32];
+extern u8 vram_data[1024 * 96];
+extern u8 bios_data[1024 * 16];
+extern u8 gamepak_backup[1024 * 128];
+
+#ifndef USE_C_CORE
+extern u16 ewram_metadata[1024 * 256];
+extern u16 iwram_metadata[1024 * 32];
+extern u16 vram_metadata[1024 * 96];
+extern u16 bios_metadata[1024 * 16];
+
+#define MIN_TAG (0x0001)
+#define MAX_TAG (0xFFFE)
+
+extern u8* ewram_native_addrs[MAX_TAG + 1];
+extern u8* iwram_native_addrs[MAX_TAG + 1];
+extern u8* vram_native_addrs[MAX_TAG + 1];
+extern u8* bios_native_addrs[MAX_TAG + 1];
+
+#if defined(NDS_LAYER) /* DSTwo */
+#  include "arch/mips/dstwo.h"
+// #elif defined(...) /* device name */
 #else
-extern u16 *palette_ram;
-extern u16 *oam_ram;
-extern u16 *io_registers;
-extern u8 *ewram;
-extern u8 *iwram;
-extern u8 *vram;
-extern u8 *bios_rom;
+#  define BIOS_CODE_CACHE_SIZE  (1024 * 128)
+#  define ROM_CODE_CACHE_SIZE   (1024 * 1024 * 2)
+#  define IWRAM_CODE_CACHE_SIZE (1024 * 128)
+#  define EWRAM_CODE_CACHE_SIZE (1024 * 640)
+#  define VRAM_CODE_CACHE_SIZE  (1024 * 256)
+#  define CODE_CACHE_SOFT_LIMIT (1024)
 #endif
+
+extern u8  bios_code_cache[BIOS_CODE_CACHE_SIZE];
+extern u8* bios_next_code;
+extern u8  rom_code_cache[ROM_CODE_CACHE_SIZE];
+extern u8* rom_next_code;
+extern u8  iwram_code_cache[IWRAM_CODE_CACHE_SIZE];
+extern u8* iwram_next_code;
+extern u8  ewram_code_cache[EWRAM_CODE_CACHE_SIZE];
+extern u8* ewram_next_code;
+extern u8  vram_code_cache[VRAM_CODE_CACHE_SIZE];
+extern u8* vram_next_code;
+#endif // !USE_C_CORE
 
 extern u32 bios_read_protect;
 

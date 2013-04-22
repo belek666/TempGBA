@@ -88,10 +88,30 @@ typedef enum
 
 typedef enum
 {
-  TRANSLATION_REGION_RAM,
+  TRANSLATION_REGION_IWRAM,
+  TRANSLATION_REGION_EWRAM,
+  TRANSLATION_REGION_VRAM,
   TRANSLATION_REGION_ROM,
   TRANSLATION_REGION_BIOS
 } TRANSLATION_REGION_TYPE;
+
+typedef enum
+{
+  /* All caches are being initialised during emulator startup. */
+  FLUSH_REASON_EMULATOR_INIT,
+  /* One cache is being flushed because it's full. */
+  FLUSH_REASON_CACHE_FULL,
+  /* One cache is being flushed because it has reached its last tag. */
+  FLUSH_REASON_LAST_TAG,
+  /* Another cache is being flushed because it has native branches into the
+   * cache that was first flushed, which have become invalid. */
+  FLUSH_REASON_NATIVE_LINK,
+  /* Most caches are being flushed because a new ROM has been loaded. */
+  FLUSH_REASON_LOADING_ROM,
+  /* Writable memory caches are being flushed because a saved state has
+   * been loaded. */
+  FLUSH_REASON_LOADING_STATE
+} CODE_CACHE_FLUSH_REASON;
 
 u32 execute_load_u8(u32 address);
 u32 execute_load_u16(u32 address);
@@ -119,18 +139,6 @@ s32 translate_block_arm(u32 pc, TRANSLATION_REGION_TYPE translation_region,
 s32 translate_block_thumb(u32 pc, TRANSLATION_REGION_TYPE translation_region,
  u32 smc_enable);
 
-#define ROM_TRANSLATION_CACHE_SIZE  (1024 * 512 * 2)  /* 2048 KB 0x20 0000 */
-#define RAM_TRANSLATION_CACHE_SIZE  (1024 * 384 * 1)  /*  384 KB 0x06 0000 現在の所 0x020000を超えた状況はない*/
-#define BIOS_TRANSLATION_CACHE_SIZE (1024 * 128 * 1)  /*   32 KB 0x00 8000 現在の所 0x008000を超えた状況はない*/
-#define TRANSLATION_CACHE_LIMIT_THRESHOLD (1024)
-
-extern u8 rom_translation_cache[ROM_TRANSLATION_CACHE_SIZE];
-extern u8 ram_translation_cache[RAM_TRANSLATION_CACHE_SIZE];
-extern u8 bios_translation_cache[BIOS_TRANSLATION_CACHE_SIZE];
-extern u8 *rom_translation_ptr;
-extern u8 *ram_translation_ptr;
-extern u8 *bios_translation_ptr;
-
 #define MAX_TRANSLATION_GATES 8
 #define MAX_IDLE_LOOPS 8
 
@@ -153,9 +161,11 @@ extern u32 in_interrupt;
 
 extern u32 *rom_branch_hash[ROM_BRANCH_HASH_SIZE];
 
-void flush_translation_cache_rom();
-void flush_translation_cache_ram();
-void flush_translation_cache_bios();
+void flush_translation_cache(TRANSLATION_REGION_TYPE translation_region,
+  CODE_CACHE_FLUSH_REASON flush_reason);
+u16 get_metadata_arm(u32 address);
+u16 get_metadata_thumb(u32 address);
+void partial_flush_ram(u32 address);
 void dump_translation_cache();
 
 extern u32 reg_mode[7][7];

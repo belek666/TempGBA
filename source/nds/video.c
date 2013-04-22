@@ -813,7 +813,7 @@ void render_scanline_conditional_bitmap(u32 start, u32 end, u16 *scanline,
    ((tile_size_##color_depth - tile_width_##color_depth) -                    \
    vertical_pixel_offset) - vertical_pixel_offset;                            \
   tile_extra_variables_##color_depth();                                       \
-  u8 *tile_base = vram + (((bg_control >> 2) & 0x03) * (1024 * 16)) +         \
+  u8 *tile_base = vram_data + (((bg_control >> 2) & 0x03) * (1024 * 16)) +    \
    vertical_pixel_offset;                                                     \
   u32 pixel_run = 256 - (horizontal_offset % 256);                            \
   u32 current_tile;                                                           \
@@ -951,7 +951,8 @@ void render_scanline_text_##combine_op##_##alpha_op(u32 layer,                \
   render_scanline_dest_##alpha_op *dest_ptr =                                 \
    ((render_scanline_dest_##alpha_op *)scanline) + start;                     \
                                                                               \
-  u16 *map_base = (u16 *)(vram + ((bg_control >> 8) & 0x1F) * (1024 * 2));    \
+  u16 *map_base = (u16 *)(vram_data + ((bg_control >> 8) & 0x1F) *            \
+    (1024 * 2));                                                              \
   u16 *map_ptr, *second_ptr;                                                  \
   u8 *tile_ptr;                                                               \
                                                                               \
@@ -1195,8 +1196,8 @@ void render_scanline_affine_##combine_op##_##alpha_op(u32 layer,              \
   u32 map_size = (bg_control >> 14) & 0x03;                                   \
   u32 width_height = 1 << (7 + map_size);                                     \
   u32 map_pitch = map_size + 4;                                               \
-  u8 *map_base = vram + (((bg_control >> 8) & 0x1F) * (1024 * 2));            \
-  u8 *tile_base = vram + (((bg_control >> 2) & 0x03) * (1024 * 16));          \
+  u8 *map_base = vram_data + (((bg_control >> 8) & 0x1F) * (1024 * 2));       \
+  u8 *tile_base = vram_data + (((bg_control >> 2) & 0x03) * (1024 * 16));     \
   u8 *tile_ptr = NULL;                                                        \
   u32 map_offset, last_map_offset = (u32)-1;                                  \
   u32 i;                                                                      \
@@ -1346,22 +1347,22 @@ render_scanline_affine_builder(transparent, alpha);
 
 
 #define render_scanline_vram_setup_mode3()                                    \
-  u16 *src_ptr = (u16 *)vram                                                  \
+  u16 *src_ptr = (u16 *)vram_data                                             \
 
 #define render_scanline_vram_setup_mode5()                                    \
   u16 *src_ptr;                                                               \
   if(io_registers[REG_DISPCNT] & 0x10)                                        \
-    src_ptr = (u16 *)(vram + 0xA000);                                         \
+    src_ptr = (u16 *)(vram_data + 0xA000);                                    \
   else                                                                        \
-    src_ptr = (u16 *)vram                                                     \
+    src_ptr = (u16 *)vram_data                                                \
 
 #define render_scanline_vram_setup_mode4()                                    \
   u16 *palette = palette_ram;                                                 \
   u8 *src_ptr;                                                                \
   if(io_registers[REG_DISPCNT] & 0x10)                                        \
-    src_ptr = (u8*)(vram + 0xA000);                                           \
+    src_ptr = (u8*)(vram_data + 0xA000);                                      \
   else                                                                        \
-    src_ptr = (u8*)(vram)                                                     \
+    src_ptr = (u8*)(vram_data)                                                \
 
 // Build bitmap scanline rendering functions.
 
@@ -1963,7 +1964,7 @@ void render_scanline_obj_##alpha_op##_##map_space(u32 priority,               \
   u32 pixel_run;                                                              \
   u16 *oam_ptr;                                                               \
   render_scanline_dest_##alpha_op *dest_ptr;                                  \
-  u8 *tile_base = vram + 0x10000;                                             \
+  u8 *tile_base = vram_data + 0x10000;                                        \
   u8 *tile_ptr;                                                               \
   u32 obj_count = obj_priority_count[priority][vcount];                       \
   u8 *obj_list = obj_priority_list[priority][vcount];                         \

@@ -101,8 +101,8 @@ unsigned int RegisterOffsets[28] = {
 // For this, pick any large memory block containing DATA (not code)
 // that's already allocated by the program. It will get clobbered
 // and the program will become unusable.
-extern u8 vram[1024 * 96 * 2];
-#define EMERGENCY_MEMORY ((void*) vram)
+extern u8 vram_data[1024 * 96];
+#define EMERGENCY_MEMORY ((void*) vram_data)
 
 unsigned int DisassembleInstructionMIPS32RType(unsigned int Instruction,
 	char* ShortForm, char* CanonicalForm);
