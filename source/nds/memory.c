@@ -2836,8 +2836,7 @@ dma_region_type dma_region_map[16] =
   dma_smc_vars_##type()                                                       \
 
 #define dma_vars_vram(type)                                                   \
-  type##_ptr &= 0x1FFFF;                                                      \
-  if(type##_ptr >= 0x18000)                                                   \
+  if ((type##_ptr & 0x18000) == 0x18000)                                      \
     type##_ptr -= 0x8000                                                      \
 
 #define dma_vars_palette_ram(type)                                            \
@@ -2893,10 +2892,7 @@ dma_region_type dma_region_map[16] =
   read_value = ADDRESS##transfer_size(iwram_data, type##_ptr & 0x7FFF)        \
 
 #define dma_read_vram(type, transfer_size)                                    \
-  if (type##_ptr & 0x10000)                                                   \
-    read_value = ADDRESS##transfer_size(vram_data, type##_ptr & 0x17FFF);     \
-  else                                                                        \
-    read_value = ADDRESS##transfer_size(vram_data, type##_ptr & 0xFFFF)       \
+  read_value = ADDRESS##transfer_size(vram_data, type##_ptr & 0x1FFFF)        \
 
 #define dma_read_io(type, transfer_size)                                      \
   read_value = ADDRESS##transfer_size(io_registers, type##_ptr & 0x7FFF)      \
@@ -2929,10 +2925,7 @@ dma_region_type dma_region_map[16] =
   post_write_memory(type##_ptr, transfer_size / 8)                            \
 
 #define dma_write_vram(type, transfer_size)                                   \
-  if (type##_ptr & 0x10000)                                                   \
-    ADDRESS##transfer_size(vram_data, type##_ptr & 0x17FFF) = read_value;     \
-  else                                                                        \
-    ADDRESS##transfer_size(vram_data, type##_ptr & 0xFFFF) = read_value;      \
+  ADDRESS##transfer_size(vram_data, type##_ptr & 0x1FFFF) = read_value;       \
   post_write_memory(type##_ptr, transfer_size / 8)                            \
 
 #define dma_write_io(type, transfer_size)                                     \

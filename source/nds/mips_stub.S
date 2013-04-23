@@ -562,7 +562,7 @@ mips_get_metadata_arm:
   la   $6, ewram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x3FFFC]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 2($6)                  # return metadata+(pc & 0x3FFFC)[1]
+  lh   $2, 2($6)                  # return metadata+(pc & 0x3FFFC)[1]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -576,7 +576,7 @@ mips_get_metadata_arm:
   la   $6, iwram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x7FFC]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 2($6)                  # return metadata+(pc & 0x7FFC)[1]
+  lh   $2, 2($6)                  # return metadata+(pc & 0x7FFC)[1]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -593,7 +593,7 @@ mips_get_metadata_arm:
   la   $6, vram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0xFFFC]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 2($6)                  # return metadata+(pc & 0xFFFC)[1]
+  lh   $2, 2($6)                  # return metadata+(pc & 0xFFFC)[1]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -608,7 +608,7 @@ mips_get_metadata_arm:
   la   $6, vram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x17FFC]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 2($6)                  # return metadata+(pc & 0x17FFC)[1]
+  lh   $2, 2($6)                  # return metadata+(pc & 0x17FFC)[1]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -636,7 +636,7 @@ mips_get_metadata_thumb:
   la   $6, ewram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x3FFFE]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 0($6)                  # return metadata[pc & 0x3FFFE]
+  lh   $2, 0($6)                  # return metadata[pc & 0x3FFFE]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -650,7 +650,7 @@ mips_get_metadata_thumb:
   la   $6, iwram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x7FFE]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 0($6)                  # return metadata[pc & 0x7FFE]
+  lh   $2, 0($6)                  # return metadata[pc & 0x7FFE]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -667,7 +667,7 @@ mips_get_metadata_thumb:
   la   $6, vram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0xFFFE]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 0($6)                  # return metadata[pc & 0xFFFE]
+  lh   $2, 0($6)                  # return metadata[pc & 0xFFFE]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
@@ -682,7 +682,7 @@ mips_get_metadata_thumb:
   la   $6, vram_metadata
   add  $6, $6, $5                 # $6 = &metadata[pc & 0x17FFE]
 #ifndef NO_LOAD_DELAY_SLOT
-  lw   $2, 0($6)                  # return metadata[pc & 0x17FFE]
+  lh   $2, 0($6)                  # return metadata[pc & 0x17FFE]
   jr   $ra                        # to the caller
   nop                             # delay for both things
 #else
