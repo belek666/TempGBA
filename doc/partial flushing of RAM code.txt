@@ -1,5 +1,6 @@
 C 2013-04-18 [Nebuleon]  Partial flushing of RAM code  M 2013-04-18 [Nebuleon]
                                                          2013-04-18 [Normmatt]
+                                                         2013-04-22 [Nebuleon]
 
 Alright. Here's my idea for partially flushing the translation buffer for
 writable areas.
@@ -19,8 +20,8 @@ experimental code):
   video mode.
 
 Of course, it is possible to place ARM code in EWRAM and VRAM (which would
-then be fetched twice too slow), and Thumb code in IWRAM (which would just
-waste the 32-bit bus).
+then be fetched twice too slow), and Thumb code in IWRAM (which would be
+prefetched two instructions at a time).
 
 ARM and Thumb code may freely be mixed in the same memory line, and a piece
 of code may be both valid ARM and valid Thumb.
@@ -149,9 +150,10 @@ All of this to finally define a Partial Flush targetting a certain Data Word:
   will be made to the new code. Because no return address is inside the old
   emitted code at that point, this is perfectly safe even with a Full Flush.
 
-Since that instruction will be the first of its block, it will not need to
-perform a check for modification. It may be a subset of a larger block, which
-will be recompiled separately. For example:
+Because that instruction may be the target of a branch from later inside the
+same block, it will need to perform a check for modification before it runs,
+even if it has clearly just been read and not modified. It may be a subset
+of a larger block, which will be recompiled separately. For example:
 
   {Start: ? ? ?}              [SUB|B Start] <- Flushed this
   [Start: MOV|SUBS|CMP|...|BEQ|SUB|B Start] <- At Start, not yet compiled

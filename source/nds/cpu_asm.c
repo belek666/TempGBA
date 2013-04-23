@@ -3248,23 +3248,6 @@ block_lookup_address_body(dual);
 
 block_data_type block_data[MAX_BLOCK_SIZE];
 
-#define smc_write_arm_yes()                                                   \
-  if(ADDRESS32(pc_address_block, (block_end_pc & 0x7FFC) - 0x8000) == 0x0000) \
-  {                                                                           \
-    ADDRESS32(pc_address_block, (block_end_pc & 0x7FFC) - 0x8000) =           \
-     0xFFFFFFFF;                                                              \
-  }                                                                           \
-
-#define smc_write_thumb_yes()                                                 \
-  if(ADDRESS16(pc_address_block, (block_end_pc & 0x7FFE) - 0x8000) == 0x0000) \
-  {                                                                           \
-    ADDRESS16(pc_address_block, (block_end_pc & 0x7FFE) - 0x8000) = 0xFFFF;   \
-  }                                                                           \
-
-#define smc_write_arm_no()                                                    \
-
-#define smc_write_thumb_no()                                                  \
-
 /*
  * Inserts Value into a sorted Array of unique values (or doesn't), of
  * size Size.
@@ -3343,7 +3326,6 @@ static s32 BinarySearch(u32* Array, u32 Value, u32 Size)
   do                                                                          \
   {                                                                           \
     check_pc_region(block_end_pc);                                            \
-    smc_write_##type##_##smc_write_op();                                      \
     type##_load_opcode();                                                     \
     type##_flag_status();                                                     \
                                                                               \
