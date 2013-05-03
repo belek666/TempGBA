@@ -54,7 +54,7 @@
 
 .global memory_map_read
 .global memory_map_write
-.global reg
+.extern reg
 
 .extern spsr
 
@@ -4096,9 +4096,6 @@ call_bios_hle:
 
 memory_map_read:
   .space 0x8000
-
-reg:
-  .space 0x100
 
 memory_map_write:
   .space 0x8000

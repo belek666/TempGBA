@@ -48,6 +48,8 @@
 #  define TRANSLATION_CACHE_LIMIT_THRESHOLD (1024)
 #endif
 
+#define CACHE_LINE_ALIGNED __attribute__((aligned(CACHE_LINE_SIZE)))
+
 /******************************************************************************
  * 
  ******************************************************************************/

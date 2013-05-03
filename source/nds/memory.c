@@ -158,6 +158,8 @@ u8 cpu_waitstate_cycles_seq[2][16] =
 };
 #endif
 
+u32 reg[64] CACHE_LINE_ALIGNED;
+
 // GBA memory areas.
 u16 palette_ram   [  0x200]; // Palette RAM             (05000000h)      1 KiB
 u16 oam_ram       [  0x200]; // Object Attribute Memory (07000000h)      1 KiB

@@ -186,13 +186,12 @@ extern u8  gamepak_backup[0x20000];
 
 extern u16 iwram_metadata[ 0x8000];
 extern u16 ewram_metadata[0x40000];
-extern u16 bios_metadata [ 0x4000];
 #endif
 
 extern u32 bios_read_protect;
 
 extern u8 *memory_map_read[8 * 1024];
-extern u32 reg[64];
+extern u32 reg[64] CACHE_LINE_ALIGNED;
 extern u8 *memory_map_write[8 * 1024];
 
 extern FILE_TAG_TYPE gamepak_file_large;
