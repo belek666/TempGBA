@@ -511,7 +511,7 @@ int BDF_font_init(void)
     fonts_max_height= 0;
 #ifndef HAVE_ODF
     sprintf(tmp_path, "%s/%s", main_path, BDF_PICTOCHAT);
-    err= parse_bdf(tmp_path, 32 /* from SPACE */, 8564 /* to one past the last character, "DOWNWARDS ARROW" */, &bdflib_info[0], 1);
+    err= parse_bdf(tmp_path, 32 /* from SPACE */, 0x30FC + 1 - 32 /* to one past the last character, "KATAKANA-HIRAGANA PROLONGED SOUND MARK" */, &bdflib_info[0], 1);
     if(err < 0)
     {
         printf("BDF 0 initial error: %d\n", err);
