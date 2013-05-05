@@ -2,7 +2,7 @@ In this directory, you will find the source file for the main font used by
 TempGBA. It's an Adobe BDF file, which is fed into the emulator when running
 in "font dump" mode to produce a more efficient representation in an "ODF"
 format. The font is based on the one used by Pictochat, with a few more
-characters that Pictochat does not have (but no Japanese characters).
+characters that Pictochat does not have.
 
 You can edit the font in an application that reads BDF bitmap fonts, such as
 FontForge. Open the font in the application then export it again as BDF.
@@ -12,8 +12,9 @@ new language.
 To include the more efficient representation (ODF) in TEMPGBA/system after
 editing the BDF file:
 
- 1. If your font added characters beyond U+2193 DOWNWARDS ARROW, adjust the
-    maximum codepoint in source/nds/bdf_font.c, after the first instance of
+ 1. If your font added characters beyond U+30FC KATAKANA-HIRAGANA PROLONGED
+    SOUND MARK, adjust the maximum codepoint in source/nds/bdf_font.c, after
+    the first instance of
   > #ifndef HAVE_ODF
  2. In source/nds/bdf_font.c,
   > #define DUMP_ODF
