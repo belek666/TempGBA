@@ -2237,7 +2237,6 @@ GBA キー *L
 #MSG_BUTTON_MAPPING_RAPID_B
 ターボ *B
 #MSG_PROGRESS_HOTKEY_WAITING_FOR_KEYS
-Press the buttons you wish to use to perform this action.
 お好みのキー操作を押してください。
 #MSG_PROGRESS_MAPPING_WAITING_FOR_KEY
 このGBAキーにマップしたいDSキーを押してください。
@@ -2292,17 +2291,17 @@ Press the buttons you wish to use to perform this action.
 #MSG_VIDEO_REWINDING_0
 無効にされた
 #MSG_VIDEO_REWINDING_1
-0.25秒 (合計で2.5秒)
+0.25 秒 (合計で 2.5 秒)
 #MSG_VIDEO_REWINDING_2
-0.5秒 (合計で5秒)
+0.5 秒 (合計で 5 秒)
 #MSG_VIDEO_REWINDING_3
-1秒 (合計で10秒)
+1 秒 (合計で 10 秒)
 #MSG_VIDEO_REWINDING_4
-2秒 (合計で20秒)
+2 秒 (合計で 20秒)
 #MSG_VIDEO_REWINDING_5
-5秒 (合計で50秒)
+5 秒 (合計で 50 秒)
 #MSG_VIDEO_REWINDING_6
-10秒 (合計で1分40秒)
+10 秒 (合計で 1 分 40 秒)
 #MSG_GENERAL_OFF
 オフ
 #MSG_GENERAL_ON
