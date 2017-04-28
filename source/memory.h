@@ -2,7 +2,6 @@
  *
  * Copyright (C) 2006 Exophase <exophase@gmail.com>
  * Copyright (C) 2007 takka <takka@tfact.net>
- * Copyright (C) 2007 ????? <?????>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,11 +21,9 @@
 #ifndef MEMORY_H
 #define MEMORY_H
 
-#include "cpu.h"
 
-#define SAVESTATE_SIZE 506952
-#define SAVESTATE_SIZE_OLD 506947
-#define SVS_HEADER_SIZE 11
+#define SAVESTATE_SIZE  0x80000 // 512K Byte (524288 Byte)
+#define SVS_HEADER_SIZE 12
 extern const u8 SVS_HEADER_E[SVS_HEADER_SIZE];
 extern const u8 SVS_HEADER_F[SVS_HEADER_SIZE];
 #define SVS_FILE_SIZE (SAVESTATE_SIZE+SVS_HEADER_SIZE)
@@ -88,7 +85,7 @@ typedef struct
   DMA_LENGTH_TYPE length_type;
   DMA_START_TYPE start_type;
   DMA_IRQ_TYPE irq;
-} DMA_TRANSFER_TYPE;
+} DmaTransferType;
 
 typedef enum
 {
@@ -132,6 +129,8 @@ typedef enum
   REG_BLDCNT      = 0x028,
   REG_BLDALPHA    = 0x029,
   REG_BLDY        = 0x02A,
+  REG_SOUNDCNT_X  = 0x042,
+  REG_SOUNDBIAS   = 0x044,
   REG_TM0D        = 0x080,
   REG_TM0CNT      = 0x081,
   REG_TM1D        = 0x082,
@@ -174,33 +173,41 @@ typedef enum
 
 typedef struct
 {
+  TIMER_STATUS_TYPE status;
+  TIMER_IRQ_TYPE irq;
+
+  TIMER_DS_CHANNEL_TYPE direct_sound_channels;
+  FIXED08_24 frequency_step;
+
   s32 count;
   u32 reload;
+  u32 reload_update;
+
   u32 prescale;
-  u32 stop_cpu_ticks; /* NOT USE */
-  FIXED16_16 frequency_step;
-  TIMER_DS_CHANNEL_TYPE direct_sound_channels;
-  TIMER_IRQ_TYPE irq;
-  TIMER_STATUS_TYPE status;
-} TIMER_TYPE;
+
+  u32 control_value;
+  u32 control_update;
+} TimerType;
 
 // グローバル変数宣言
 
-extern u32 mem_save_flag;
 extern char gamepak_title[13];
 extern char gamepak_code[5];
 extern char gamepak_maker[3];
 extern char CurrentGamePath[MAX_PATH];
 extern bool IsGameLoaded;
 extern u32 gamepak_crc32;
+extern char backup_id[16];
 
 extern u8 *gamepak_rom;
-extern u8 *gamepak_rom_resume;
 extern u32 gamepak_ram_buffer_size;
 extern u32 oam_update;
-extern u32 gbc_sound_update;
-extern DMA_TRANSFER_TYPE dma[4];
-extern TIMER_TYPE timer[4];
+extern DmaTransferType dma[4];
+
+extern TimerType timer[4];
+extern const u32 timer_prescale_table[];
+
+extern u32 cpu_dma_hack;
 
 extern u8 savestate_write_buffer[];
 extern u8 *g_state_buffer_ptr;
@@ -218,19 +225,16 @@ struct BIOS_DATA
 
 extern u16 palette_ram   [  0x200];
 extern u16 oam_ram       [  0x200];
-extern u16 io_registers  [ 0x4000];
+extern u16 io_registers  [  0x200];
 extern u8  ewram_data    [0x40000];
 extern u8  iwram_data    [ 0x8000];
 extern u8  vram          [0x18000];
 struct BIOS_DATA bios;
 extern u8  gamepak_backup[0x20000];
 
-#ifndef USE_C_CORE
-
 extern u16 iwram_metadata[ 0x8000];
 extern u16 ewram_metadata[0x40000];
 extern u16 vram_metadata [0x18000];
-#endif
 
 extern u32 bios_read_protect;
 
@@ -244,15 +248,8 @@ extern char main_path[MAX_PATH + 1];
 
 extern FILE_TAG_TYPE gamepak_file_large;
 
-extern u32 gbc_sound_wave_update;
-
-#ifdef OLD_COUNT
-extern u32 waitstate_cycles_sequential[16][3];
-#else
-extern u8 waitstate_cycles_seq[2][16];
-extern u8 waitstate_cycles_non_seq[2][16];
-extern u8 cpu_waitstate_cycles_seq[2][16];
-#endif
+extern u8 memory_waitstate[4][16];
+extern u8 fetch_waitstate[4][16];
 
 // SIO
 extern u32 g_multi_mode;
@@ -265,32 +262,61 @@ extern u32 tilt_sensor_y;
 
 // 関数宣言
 
-extern u8 read_memory8(u32 address);
-extern u32 read_memory16(u32 address);
-extern u16 read_memory16_signed(u32 address);
-extern u32 read_memory32(u32 address);
-extern CPU_ALERT_TYPE write_memory8(u32 address, u8 value);
-extern CPU_ALERT_TYPE write_memory16(u32 address, u16 value);
-extern CPU_ALERT_TYPE write_memory32(u32 address, u32 value);
+u8  read_memory8(u32 address);
+u32 read_memory16(u32 address);
+s16 read_memory16_signed(u32 address);
+u32 read_memory32(u32 address);
 
-extern CPU_ALERT_TYPE dma_transfer(DMA_TRANSFER_TYPE *dma);
-extern u8 *memory_region(u32 address, u32 *memory_limit);
-extern s32 load_bios(char *name);
-extern ssize_t load_gamepak(char *file_path);
-extern u8 *load_gamepak_page(u16 physical_index);
-extern u32 load_backup();
-extern void init_memory();
-extern void init_gamepak_buffer();
-extern void update_backup();
-extern void update_backup_force();
-extern void bios_region_read_allow();
-extern void bios_region_read_protect();
-extern u32 load_state(uint32_t SlotNumber);
-extern u32 save_state(uint32_t SlotNumber, u16 *screen_capture);
-extern void init_rewind(void);
-extern void savestate_rewind(void);
-extern void loadstate_rewind(void);
+u8  read_open_memory8(u32 address);
+u16 read_open_memory16(u32 address);
+u32 read_open_memory32(u32 address);
+
+CPU_ALERT_TYPE write_memory8(u32 address, u8 value);
+CPU_ALERT_TYPE write_memory16(u32 address, u16 value);
+CPU_ALERT_TYPE write_memory32(u32 address, u32 value);
+
+CPU_ALERT_TYPE write_io_register8(u32 address, u32 value);
+CPU_ALERT_TYPE write_io_register16(u32 address, u32 value);
+CPU_ALERT_TYPE write_io_register32(u32 address, u32 value);
+
+CPU_ALERT_TYPE write_rtc(u32 address, u32 value);
+
+u32 read_eeprom();
+CPU_ALERT_TYPE write_eeprom(u32 address, u32 value);
+
+u8 read_backup(u32 address);
+CPU_ALERT_TYPE write_backup(u32 address, u32 value);
+
+CPU_ALERT_TYPE dma_transfer(DmaTransferType *dma);
+
+s32 load_bios(char *name);
+u32 load_backup();
+
+ssize_t load_gamepak(char *file_path);
+u8 *load_gamepak_page(u16 physical_index);
+void init_memory();
+void init_gamepak_buffer();
+
+void update_backup();
+void update_backup_force();
+
+u32 load_state(uint32_t SlotNumber);
+u32 save_state(uint32_t SlotNumber, u16 *screen_capture);
+void init_rewind(void);
+void savestate_rewind(void);
+void loadstate_rewind(void);
 
 extern unsigned int rewind_queue_len;
+
+#define GBA_IME_STATE  (io_registers[REG_IME] != 0)
+
+#define pMEMORY_WS16N(resion) *(memory_waitstate[0] + (resion))
+#define pMEMORY_WS16S(resion) *(memory_waitstate[2] + (resion))
+#define pMEMORY_WS32N(resion) *(memory_waitstate[1] + (resion))
+#define pMEMORY_WS32S(resion) *(memory_waitstate[3] + (resion))
+#define pFETCH_WS16N(resion)  *(fetch_waitstate[0]  + (resion))
+#define pFETCH_WS16S(resion)  *(fetch_waitstate[2]  + (resion))
+#define pFETCH_WS32N(resion)  *(fetch_waitstate[1]  + (resion))
+#define pFETCH_WS32S(resion)  *(fetch_waitstate[3]  + (resion))
 
 #endif

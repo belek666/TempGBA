@@ -21,7 +21,7 @@
 #include <sys/time.h>
 #include <stdlib.h>
 
-TIMER_TYPE timer[4];
+TimerType timer[4];
 
 frameskip_type current_frameskip_type = auto_frameskip;
 u32 frameskip_value = 4;
@@ -37,6 +37,11 @@ u32 frame_ticks = 0;
 u32 execute_cycles = 960;
 s32 video_count = 960;
 u32 ticks;
+
+u32 irq_ticks = 0;
+u8 cpu_init_state = 0;
+
+u32 dma_cycle_count = 0;
 
 u32 arm_frame = 0;
 u32 thumb_frame = 0;
@@ -60,8 +65,6 @@ char executable_path[MAX_PATH + 1];
     if(timer[timer_number].status != TIMER_CASCADE)                           \
     {                                                                         \
       timer[timer_number].count -= execute_cycles;                            \
-      io_registers[REG_TM##timer_number##D] =                                 \
-       -(timer[timer_number].count >> timer[timer_number].prescale);          \
     }                                                                         \
                                                                               \
     if(timer[timer_number].count <= 0)                                        \
@@ -73,9 +76,9 @@ char executable_path[MAX_PATH + 1];
        (timer[timer_number + 1].status == TIMER_CASCADE))                     \
       {                                                                       \
         timer[timer_number + 1].count--;                                      \
-        io_registers[REG_TM0D + (timer_number + 1) * 2] =                     \
-         -(timer[timer_number + 1].count);                                    \
       }                                                                       \
+                                                                              \
+      u32 timer_reload = timer[timer_number].reload << timer[timer_number].prescale; \
                                                                               \
       if(timer_number < 2)                                                    \
       {                                                                       \
@@ -86,9 +89,23 @@ char executable_path[MAX_PATH + 1];
           sound_timer(timer[timer_number].frequency_step, 1);                 \
       }                                                                       \
                                                                               \
-      timer[timer_number].count +=                                            \
-       (timer[timer_number].reload << timer[timer_number].prescale);          \
+      if (timer[timer_number].reload_update != 0)                             \
+      {                                                                       \
+        SOUND_UPDATE_FREQUENCY_STEP(timer_number);                            \
+        timer[timer_number].reload_update = 0;                                \
+      }                                                                       \
+                                                                              \
+      timer[timer_number].count += timer_reload;                              \
     }                                                                         \
+                                                                              \
+    io_registers[REG_TM##timer_number##D] =                                   \
+      -(timer[timer_number].count >> timer[timer_number].prescale);           \
+  }                                                                           \
+                                                                              \
+  if (timer[timer_number].control_update != 0)                                \
+  {                                                                           \
+    timer_control(timer_number, timer[timer_number].control_value);           \
+    timer[timer_number].control_update = 0;                                   \
   }                                                                           \
 
 char *file_ext[] = { ".gba", ".bin", ".zip", NULL };
@@ -103,21 +120,28 @@ void init_main()
 
   for(i = 0; i < 4; i++)
   {
+    memset(&dma[i], 0, sizeof(DmaTransferType));
+
     dma[i].start_type = DMA_INACTIVE;
     dma[i].direct_sound_channel = DMA_NO_DIRECT_SOUND;
+
+    memset(&timer[i], 0, sizeof(TimerType));
+
     timer[i].status = TIMER_INACTIVE;
     timer[i].reload = 0x10000;
-    timer[i].stop_cpu_ticks = 0;
+    timer[i].direct_sound_channels = TIMER_DS_CHANNEL_NONE;
   }
-
-  timer[0].direct_sound_channels = TIMER_DS_CHANNEL_BOTH;
-  timer[1].direct_sound_channels = TIMER_DS_CHANNEL_NONE;
 
   cpu_ticks = 0;
   frame_ticks = 0;
 
-  execute_cycles = 960;
-  video_count = 960;
+  execute_cycles = ResolveSetting(BootFromBIOS, PerGameBootFromBIOS) ? 960 : 272;
+  video_count = execute_cycles;
+
+  dma_cycle_count = 0;
+
+  irq_ticks = 0;
+  cpu_init_state = 0;
 
   if (!caches_inited)
   {
@@ -281,22 +305,81 @@ int main(int argc, char *argv[])
 
   // We'll never actually return from here.
 
+  SetGameResolution();
+
   execute_arm_translate(execute_cycles);
   return 0;
 }
 
+static void timer_control(u8 timer_number, u32 value)
+{
+  TimerType *tm = timer + timer_number;
+
+  if ((value & 0x80) != 0)
+  {
+    if (tm->status == TIMER_INACTIVE)
+    {
+      if ((value & 0x04) != 0)
+      {
+        tm->status = TIMER_CASCADE;
+        tm->prescale = 0;
+      }
+      else
+      {
+        tm->status = TIMER_PRESCALE;
+        tm->prescale = timer_prescale_table[value & 0x03];
+      }
+
+      tm->irq = (value >> 6) & 0x01;
+
+      u32 timer_reload = tm->reload;
+
+      io_registers[REG_TM0D + (timer_number << 1)] = 0x10000 - timer_reload;
+
+      timer_reload <<= tm->prescale;
+      tm->count = timer_reload;
+
+      if (timer_number < 2)
+      {
+        tm->frequency_step = FLOAT_TO_FP08_24((SYS_CLOCK / SOUND_FREQUENCY) / timer_reload);
+        tm->reload_update = 0;
+
+        if ((tm->direct_sound_channels & 0x01) != 0)
+          adjust_direct_sound_buffer(0, cpu_ticks + timer_reload);
+
+        if ((tm->direct_sound_channels & 0x02) != 0)
+          adjust_direct_sound_buffer(1, cpu_ticks + timer_reload);
+      }
+    }
+  }
+  else
+  {
+    tm->status = TIMER_INACTIVE;
+  }
+}
+
+
+#define SOUND_CLOCK_TICKS (167772)  // 1/100 second
+int sound_ticks = SOUND_CLOCK_TICKS;
+
 u32 update_gba()
 {
   IRQ_TYPE irq_raised = IRQ_NONE;
+
   do
   {
-    cpu_ticks += execute_cycles;
-    reg[CHANGED_PC_STATUS] = 0;
+    cpu_dma_hack = 0;
 
-    if(gbc_sound_update)
+    during_dma_transfer_loop:
+
+    cpu_ticks += execute_cycles;
+
+    sound_ticks -= execute_cycles;
+
+    if (sound_ticks <= 0)
     {
       update_gbc_sound(cpu_ticks);
-      gbc_sound_update = 0;
+      sound_ticks += SOUND_CLOCK_TICKS;
     }
 
     update_timer(0);
@@ -348,6 +431,10 @@ u32 update_gba()
           u32 i;
 
           dispstat |= 0x01;
+
+          if(update_input())
+            continue;
+
           if(dispstat & 0x8)
           {
             irq_raised |= IRQ_VBLANK;
@@ -388,10 +475,15 @@ u32 update_gba()
           flush_ram_count = 0;
   #endif
 
-          if(update_input())
-            continue;
+#if 0
+          process_cheats();
+#endif
+
+          update_backup();
 
           update_gbc_sound(cpu_ticks);
+          ReGBA_AudioUpdate();
+
 #if 0
           synchronize();
 #endif
@@ -399,12 +491,6 @@ u32 update_gba()
 		Stats.EmulatedFrames++;
 		Stats.TotalEmulatedFrames++;
 		ReGBA_RenderScreen();
-
-          update_backup();
-
-#if 0
-          process_cheats();
-#endif
 
           vcount = 0;
         }
@@ -428,16 +514,68 @@ u32 update_gba()
       io_registers[REG_DISPSTAT] = dispstat;
     }
 
-    if(irq_raised)
-      raise_interrupt(irq_raised);
-
     execute_cycles = video_count;
+
+    CHECK_COUNT((u32)sound_ticks);
 
     check_timer(0);
     check_timer(1);
     check_timer(2);
     check_timer(3);
+
+    if (dma_cycle_count != 0)
+    {
+      CHECK_COUNT(dma_cycle_count);
+      dma_cycle_count -= execute_cycles;
+
+      goto during_dma_transfer_loop;
+    }
+
+    if (irq_raised != IRQ_NONE)
+    {
+      ADDRESS16(io_registers, 0x202) |= irq_raised;
+      irq_raised = IRQ_NONE;
+    }
+
+    if ((io_registers[REG_IF] != 0) && GBA_IME_STATE && ARM_IRQ_STATE)
+    {
+      u16 irq_mask = (reg[CPU_HALT_STATE] == CPU_STOP) ? 0x3080 : 0x3FFF;
+
+      if ((io_registers[REG_IE] & io_registers[REG_IF] & irq_mask) != 0)
+      {
+        if (cpu_init_state != 0)
+        {
+          if (irq_ticks == 0)
+          {
+            cpu_interrupt();
+            cpu_init_state = 0;
+          }
+        }
+        else
+        {
+          if (reg[CPU_HALT_STATE] == CPU_HALT)
+          {
+            cpu_interrupt();
+          }
+          else
+          {
+            // IRQ delay - Tsyncmax=3, Texc=3, Tirq=2, Tldm=20
+            //             Tsyncmin=2
+            irq_ticks = 9;
+            cpu_init_state = 1;
+          }
+        }
+      }
+    }
+
+    if (irq_ticks != 0)
+    {
+      CHECK_COUNT(irq_ticks);
+      irq_ticks -= execute_cycles;
+    }
+
   } while(reg[CPU_HALT_STATE] != CPU_ACTIVE);
+
   return execute_cycles;
 }
 
@@ -627,6 +765,12 @@ void change_ext(const char *src, char *buffer, char *extension)
   FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_ticks);                      \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, execute_cycles);                 \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, video_count);                    \
+                                                                              \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_init_state);                 \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, irq_ticks);                      \
+                                                                              \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, dma_cycle_count);                \
+                                                                              \
   FILE_##type##_ARRAY(g_state_buffer_ptr, timer);                             \
 }                                                                             \
 

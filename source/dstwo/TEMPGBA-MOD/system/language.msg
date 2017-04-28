@@ -96,6 +96,12 @@ Global button mappings...
 Game-specific button mappings...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Debugging...
+#FMT_OPTIONS_UPDATE_BACKUP
+Update backup                 %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+Exit only
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+Automatic
 #FMT_OPTIONS_LANGUAGE
 Language                          %s
 #FMT_OPTIONS_CPU_FREQUENCY
@@ -373,6 +379,12 @@ FPS 计数器               %s
 特定游戏按键映射...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 调试 (英文)...
+#FMT_OPTIONS_UPDATE_BACKUP
+更新备份                        %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+唯一的出口
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+自动
 #FMT_OPTIONS_LANGUAGE
 语言                                %s
 #FMT_OPTIONS_CPU_FREQUENCY
@@ -650,10 +662,16 @@ Affectations de boutons globales...
 Affectations de boutons pour ce jeu...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Débogage (en anglais)...
+#FMT_OPTIONS_UPDATE_BACKUP
+Mise à jour de sauvegarde  %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+sortie seulement
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automatique
 #FMT_OPTIONS_LANGUAGE
-Langue                              %s
+Langue                                %s
 #FMT_OPTIONS_CPU_FREQUENCY
-Fréquence CPU                  %s
+Fréquence CPU                   %s
 #MSG_OPTIONS_CPU_FREQUENCY_0
 [0] 240 MHz
 #MSG_OPTIONS_CPU_FREQUENCY_1
@@ -928,6 +946,12 @@ Globale Tastenbelegung...
 Spielspezifische Tastenbelegung...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Debug (in Englisch)...
+#FMT_OPTIONS_UPDATE_BACKUP
+Update-Backup              %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+nur Ausfahrt
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automatisch
 #FMT_OPTIONS_LANGUAGE
 Sprache                          %s
 #FMT_OPTIONS_CPU_FREQUENCY
@@ -1206,10 +1230,16 @@ Knoppen herconfigureren...
 Spel-specifiek knoppen herconfigureren...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Debuggen (in het Engels)...
+#FMT_OPTIONS_UPDATE_BACKUP
+update back-up              %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+enige uitgang
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automatisch
 #FMT_OPTIONS_LANGUAGE
-Taal                                  %s
+Taal                                 %s
 #FMT_OPTIONS_CPU_FREQUENCY
-CPU frequentie                 %s
+CPU frequentie                %s
 #MSG_OPTIONS_CPU_FREQUENCY_0
 [0] 240 MHz
 #MSG_OPTIONS_CPU_FREQUENCY_1
@@ -1484,6 +1514,12 @@ Teclas globales...
 Teclas para el juego...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Depuración (en inglés)...
+#FMT_OPTIONS_UPDATE_BACKUP
+actualización de backup   %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+única salida
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automático
 #FMT_OPTIONS_LANGUAGE
 Idioma                                %s
 #FMT_OPTIONS_CPU_FREQUENCY
@@ -1761,10 +1797,16 @@ Global button mappings...
 Game-specific button mappings...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Debugging (in English)...
+#FMT_OPTIONS_UPDATE_BACKUP
+aggiornamento di backup  %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+unica uscita
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automatico
 #FMT_OPTIONS_LANGUAGE
-Lingua                               %s
+Lingua                                %s
 #FMT_OPTIONS_CPU_FREQUENCY
-Frequenza CPU                 %s
+Frequenza CPU                  %s
 #MSG_OPTIONS_CPU_FREQUENCY_0
 [0] 240 MHz
 #MSG_OPTIONS_CPU_FREQUENCY_1
@@ -2038,6 +2080,12 @@ Mapeamentos de botões globais...
 Mapeamentos de botões do jogo atual...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 Depuração (em inglês)...
+#FMT_OPTIONS_UPDATE_BACKUP
+backup de atualização   %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+Sair só
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+automático
 #FMT_OPTIONS_LANGUAGE
 Idioma                              %s
 #FMT_OPTIONS_CPU_FREQUENCY
@@ -2315,8 +2363,14 @@ FPS 計數器              %s
 特定遊戲按鍵映射...
 #MSG_TOOLS_DEBUG_MENU_ENGLISH
 調試 (英文)...
+#FMT_OPTIONS_UPDATE_BACKUP
+更新備份                       %s
+#MSG_OPTIONS_UPDATE_BACKUP_EXITONLY
+唯一的出口
+#MSG_OPTIONS_UPDATE_BACKUP_AUTO
+自動
 #FMT_OPTIONS_LANGUAGE
-語言                                %s
+語言                               %s
 #FMT_OPTIONS_CPU_FREQUENCY
 CPU 主頻                        %s
 #MSG_OPTIONS_CPU_FREQUENCY_0

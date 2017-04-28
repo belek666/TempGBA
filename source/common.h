@@ -26,14 +26,11 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#define OLD_COUNT
-
 /******************************************************************************
  * 
  ******************************************************************************/
 #include <stdint.h>
 #include <inttypes.h>
-typedef uint32_t FIXED16_16;  // Q16.16 fixed-point
 #include <stdbool.h>
 
 #include <stdio.h>
@@ -53,6 +50,8 @@ typedef uint32_t FIXED16_16;  // Q16.16 fixed-point
 #	define unlikely(x)     (x)
 #   define prefetch(x, y)
 #endif
+
+#define ALIGN_DATA __attribute__((aligned(4)))
 
 #define SYS_CLOCK (16777216.0)
 
@@ -100,22 +99,24 @@ typedef uint32_t FIXED16_16;  // Q16.16 fixed-point
 #define FILE_WRITE_MEM_ARRAY(ptr, array)                                    \
   FILE_WRITE_MEM(ptr, array, sizeof(array))                                 \
 
-#define FLOAT_TO_FP16_16(value)                                             \
-  (FIXED16_16)((value) * 65536.0f)                                           \
+typedef uint32_t FIXED08_24;
 
-#define FP16_16_TO_FLOAT(value)                                             \
-  (float)((value) / 65536.0f)                                                \
+#define FLOAT_TO_FP08_24(value)                                               \
+  (FIXED08_24)((value) * 16777216.0f)                                         \
 
-#define U32_TO_FP16_16(value)                                               \
-  ((value) << 16)                                                           \
+#define FP08_24_TO_FLOAT(value)                                               \
+  (float)((value) / 16777216.0f)                                              \
 
-#define FP16_16_TO_U32(value)                                               \
-  ((value) >> 16)                                                           \
+#define U32_TO_FP08_24(value)                                                 \
+  ((value) << 24)                                                             \
 
-#define FP16_16_FRACTIONAL_PART(value)                                      \
-  ((value) & 0xFFFF)                                                        \
-  
-#define FP16_16_MAX_FRACTIONAL_PART 0xFFFF
+#define FP08_24_TO_U32(value)                                                 \
+  ((value) >> 24)                                                             \
+
+#define FP08_24_FRACTIONAL_PART(value)                                        \
+  ((value) & 0x00FFFFFF)                                                      \
+
+#define FP08_24_MAX_FRACTIONAL_PART 0x00FFFFFF
 
 #define FIXED_DIV(numerator, denominator, bits)                             \
   ((((numerator) * (1 << (bits))) + ((denominator) / 2)) / (denominator))   \
@@ -124,13 +125,10 @@ typedef uint32_t FIXED16_16;  // Q16.16 fixed-point
   *((u8 *)(base) + (offset))                                                \
 
 #define ADDRESS16(base, offset)                                             \
-  *((u16 *)(base) + ((offset) / 2))                                         \
+  *((u16 *)(base) + ((offset) >> 1))                                        \
 
 #define ADDRESS32(base, offset)                                             \
-  *((u32 *)(base) + ((offset) / 4))                                         \
-
-#define USE_BIOS 0
-#define EMU_BIOS 1
+  *((u32 *)(base) + ((offset) >> 2))                                        \
 
 #define NO  0
 #define YES 1
@@ -146,7 +144,6 @@ typedef uint32_t FIXED16_16;  // Q16.16 fixed-point
 #include "zip.h"
 #include "stats.h"
 
-#include "sha1.h"
 
 // - - - CROSS-PLATFORM TYPE DEFINITIONS - - -
 

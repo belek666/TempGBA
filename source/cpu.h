@@ -36,10 +36,13 @@ typedef enum
 
 typedef enum
 {
-  CPU_ALERT_NONE,
-  CPU_ALERT_HALT,
-  CPU_ALERT_SMC,
-  CPU_ALERT_IRQ
+  CPU_ALERT_NONE    =  0,
+  CPU_ALERT_SMC     =  1, // bit0 - SMC
+  CPU_ALERT_IRQ     =  2, // bit1 - IRQ
+  CPU_ALERT_SMC_IRQ =  3,
+  CPU_ALERT_HALT    =  4, // bit2 - HALT
+  CPU_ALERT_TIMER   =  8, // bit3 - timer counter change.
+  CPU_ALERT_DMA     = 16  // bit4 - in DMA transfer, cpu stop.
 } CPU_ALERT_TYPE;
 
 typedef enum
@@ -51,20 +54,20 @@ typedef enum
 
 typedef enum
 {
-  IRQ_NONE = 0x0000,
-  IRQ_VBLANK = 0x0001,
-  IRQ_HBLANK = 0x0002,
-  IRQ_VCOUNT = 0x0004,
-  IRQ_TIMER0 = 0x0008,
-  IRQ_TIMER1 = 0x0010,
-  IRQ_TIMER2 = 0x0020,
-  IRQ_TIMER3 = 0x0040,
-  IRQ_SERIAL = 0x0080,
-  IRQ_DMA0 = 0x0100,
-  IRQ_DMA1 = 0x0200,
-  IRQ_DMA2 = 0x0400,
-  IRQ_DMA3 = 0x0800,
-  IRQ_KEYPAD = 0x1000,
+  IRQ_NONE    = 0x0000,
+  IRQ_VBLANK  = 0x0001,
+  IRQ_HBLANK  = 0x0002,
+  IRQ_VCOUNT  = 0x0004,
+  IRQ_TIMER0  = 0x0008,
+  IRQ_TIMER1  = 0x0010,
+  IRQ_TIMER2  = 0x0020,
+  IRQ_TIMER3  = 0x0040,
+  IRQ_SERIAL  = 0x0080,
+  IRQ_DMA0    = 0x0100,
+  IRQ_DMA1    = 0x0200,
+  IRQ_DMA2    = 0x0400,
+  IRQ_DMA3    = 0x0800,
+  IRQ_KEYPAD  = 0x1000,
   IRQ_GAMEPAK = 0x2000,
 } IRQ_TYPE;
 
@@ -83,7 +86,7 @@ typedef enum
   REG_SAVE3         = 23,
   CPU_MODE          = 29,
   CPU_HALT_STATE    = 30,
-  CHANGED_PC_STATUS = 31
+  CHANGED_PC_STATUS = 31,
 } EXT_REG_NUMBERS;
 
 typedef enum
@@ -182,19 +185,13 @@ extern u32 idle_loop_targets;
 extern u32 idle_loop_target_pc[MAX_IDLE_LOOPS];
 extern u32 force_pc_update_target;
 extern u32 iwram_stack_optimize;
-//extern u32 allow_smc_ram_u8;
-//extern u32 allow_smc_ram_u16;
-//extern u32 allow_smc_ram_u32;
+
 extern u32 direct_map_vram;
-
-extern u32 in_interrupt;
-
-// extern u32 bios_mode;
 
 #define ROM_BRANCH_HASH_SIZE 65536 /* Must be a power of 2, 2 <= n <= 65536 */
 #define WRITABLE_HASH_SIZE 65536 /* Must be a power of 2, 2 <= n <= 65536 */
 
-void partial_clear_metadata(u32 address);
+void partial_clear_metadata(u32 offset, u32 region);
 void flush_translation_cache(TRANSLATION_REGION_TYPE translation_region,
   CACHE_FLUSH_REASON_TYPE flush_reason);
 void clear_metadata_area(METADATA_AREA_TYPE metadata_area,
@@ -202,13 +199,16 @@ void clear_metadata_area(METADATA_AREA_TYPE metadata_area,
 void dump_translation_cache();
 
 void set_cpu_mode(CPU_MODE_TYPE new_mode);
-void raise_interrupt(IRQ_TYPE irq_raised);
+void cpu_interrupt(void);
 
 extern u32 reg_mode[7][7];
 extern u32 spsr[6];
 
-extern const u8 cpu_modes[32];
+extern const CPU_MODE_TYPE cpu_modes[32];
 
 void init_cpu(u32 BootFromBIOS);
+
+
+#define ARM_IRQ_STATE  ((reg[REG_CPSR] & 0x80) == 0)
 
 #endif

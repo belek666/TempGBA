@@ -20,9 +20,9 @@ START_ASM   := start.S
 START_O     := start.o
 
 # - - - Names - - -
-NAME        := tempgba
+NAME        := tempgba-mod
 OUTPUT_DIR  := _dstwoplug
-PLUGIN_DIR  := TEMPGBA
+PLUGIN_DIR  := TEMPGBA-MOD
 
 # - - - Tools - - -
 CC          := $(CROSS_COMPILE)gcc
@@ -33,8 +33,8 @@ NM          := $(CROSS_COMPILE)nm
 OBJDUMP     := $(CROSS_COMPILE)objdump
 
 # - - - Sources, objects and headers - - -
-C_SRC       := gpsp_main.c ../cpu_common.c ../cpu_asm.c ../video.c ../sha1.c  \
-               gu.c ../memory.c ../sound.c ../input.c gui.c cheats.c ../bios.c\
+C_SRC       := gpsp_main.c ../cpu.c ../video.c                                \
+               gu.c ../memory.c ../sound.c ../input.c gui.c cheats.c          \
                draw.c bdf_font.c ../zip.c bitmap.c ds2_main.c charsets.c      \
                ../stats.c guru_meditation.c port.c ds2sound.c ds2memory.c
 CPP_SRC     := 
@@ -44,8 +44,8 @@ C_OBJS      := $(C_SRC:.c=.o)
 CPP_OBJS    := $(CPP_SRC:.cpp=.o)
 ASM_OBJS    := $(ASM_SRC:.S=.o)
 OBJS        := $(C_OBJS) $(CPP_OBJS) $(ASM_OBJS) $(START_O)
-HEADERS     := bdf_font.h bitmap.h charsets.h cheats.h ../sha1.h              \
-               ../common.h ../cpu_common.h ../cpu.h draw.h gpsp_main.h gu.h   \
+HEADERS     := bdf_font.h bitmap.h charsets.h cheats.h                        \
+               ../common.h ../cpu.h draw.h gpsp_main.h gu.h                   \
                gui.h ../input.h ../memory.h message.h ../mips/emit.h          \
                ../sound.h ../stats.h ../video.h ../zip.h port.h ds2sound.h
 
@@ -54,7 +54,7 @@ DEFS        := -DNDS_LAYER -DMIPS_XBURST \
                -DGIT_VERSION=$(shell git describe --always)
 
 CFLAGS      := -mips32 -mno-abicalls -fno-pic -fno-builtin -fno-exceptions    \
-               -ffunction-sections -mno-long-calls -msoft-float -G 4 -O3      \
+               -ffunction-sections -mno-long-calls -msoft-float -G 4 -O2      \
                -fgcse-sm -fgcse-las -fgcse-after-reload                       \
                -fweb -fpeel-loops -fno-inline -fno-early-inlining             \
                $(DEFS) $(INCLUDE)

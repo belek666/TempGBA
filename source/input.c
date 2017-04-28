@@ -2,7 +2,6 @@
  *
  * Copyright (C) 2006 Exophase <exophase@gmail.com>
  * Copyright (C) 2007 takka <takka@tfact.net>
- * Copyright (C) 2007 ????? <?????>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -27,19 +26,23 @@ void trigger_key(u32 key)
 {
   u32 p1_cnt = io_registers[REG_P1CNT];
 
-  if((p1_cnt >> 14) & 0x01)
+  if (((p1_cnt & 0x4000) != 0) || (reg[CPU_HALT_STATE] == CPU_STOP))
   {
     u32 key_intersection = (p1_cnt & key) & 0x3FF;
 
-    if(p1_cnt >> 15)
+    if ((p1_cnt & 0x8000) != 0)
     {
-      if(key_intersection == (p1_cnt & 0x3FF))
-        raise_interrupt(IRQ_KEYPAD);
+      if (key_intersection == (p1_cnt & 0x3FF))
+      {
+        ADDRESS16(io_registers, 0x202) |= IRQ_KEYPAD;
+      }
     }
     else
     {
-      if(key_intersection)
-        raise_interrupt(IRQ_KEYPAD);
+      if (key_intersection != 0)
+      {
+        ADDRESS16(io_registers, 0x202) |= IRQ_KEYPAD;
+      }
     }
   }
 }

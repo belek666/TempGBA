@@ -37,7 +37,6 @@ void StatsInit(void)
 void StatsInitGame(void)
 {
 	StatsInit();
-#ifndef USE_C_CORE
 	u32 reason;
 	u32 area;
 	for (area = 0; area < TRANSLATION_REGION_COUNT; area++)
@@ -57,7 +56,6 @@ void StatsInitGame(void)
 		}
 	}
 	Stats.PartialFlushCount = 0;
-#endif
 	Stats.SoundBufferUnderrunCount = 0;
 	Stats.InSoundBufferUnderrun = 0;
 	Stats.TotalEmulatedFrames = 0;

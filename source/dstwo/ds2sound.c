@@ -74,9 +74,21 @@ signed int ReGBA_AudioUpdate()
 	int ret;
 
 	u8 WasInUnderrun = Stats.InSoundBufferUnderrun;
-	Stats.InSoundBufferUnderrun = n == 0 && ReGBA_GetAudioSamplesAvailable() < AUDIO_LEN * 2;
+	Stats.InSoundBufferUnderrun = n == 0 && ReGBA_GetAudioSamplesAvailable() < AUDIO_LEN * 2 * OUTPUT_FREQUENCY_DIVISOR;
 	if (Stats.InSoundBufferUnderrun && !WasInUnderrun)
 		Stats.SoundBufferUnderrunCount++;
+
+	/* There must be AUDIO_LEN * 2 samples generated in order for the first
+	 * AUDIO_LEN to be valid. Some sound is generated in the past from the
+	 * future, and if the first AUDIO_LEN is grabbed before the core has had
+	 * time to generate all of it (at AUDIO_LEN * 2), the end may still be
+	 * silence, causing crackling. */
+	if (ReGBA_GetAudioSamplesAvailable() < AUDIO_LEN * 2 * OUTPUT_FREQUENCY_DIVISOR)
+	{
+		// Generate more sound first, please!
+		if ((AUTO_SKIP != 0) && (SKIP_RATE < 8)) SKIP_RATE++;
+		return -1;
+	}
 
 	// On auto frameskip, sound buffers being full or empty determines
 	// whether we're late.
@@ -86,7 +98,7 @@ signed int ReGBA_AudioUpdate()
 		{
 			// We're in no hurry, because 2 buffers are still full.
 			// Minimum skip 1
-			if(SKIP_RATE > 1)
+			if(SKIP_RATE >= 1)
 			{
 #if defined TRACE || defined TRACE_FRAMESKIP
 				ReGBA_Trace("I: Decreasing automatic frameskip: %u..%u", SKIP_RATE, SKIP_RATE - 1);
@@ -107,17 +119,6 @@ signed int ReGBA_AudioUpdate()
 		}
 	}
 
-	/* There must be AUDIO_LEN * 2 samples generated in order for the first
-	 * AUDIO_LEN to be valid. Some sound is generated in the past from the
-	 * future, and if the first AUDIO_LEN is grabbed before the core has had
-	 * time to generate all of it (at AUDIO_LEN * 2), the end may still be
-	 * silence, causing crackling. */
-	if (ReGBA_GetAudioSamplesAvailable() < AUDIO_LEN * 2)
-	{
-		// Generate more sound first, please!
-		return -1;
-	}
-
 	// We have enough sound. Complete this update.
 	if (game_fast_forward || temporary_fast_forward)
 	{
@@ -127,7 +128,7 @@ signed int ReGBA_AudioUpdate()
 			// This needs to be high to avoid audible crackling/bubbling,
 			// but not so high as to require all of the sound to be emitted.
 			// gpSP synchronises on the sound, after all. -Neb, 2013-03-23
-			ReGBA_DiscardAudioSamples(ReGBA_GetAudioSamplesAvailable() - AUDIO_LEN);
+			ReGBA_DiscardAudioSamples((ReGBA_GetAudioSamplesAvailable() / (2 * OUTPUT_FREQUENCY_DIVISOR)) - AUDIO_LEN);
 			return 0;
 		}
 	}
@@ -150,35 +151,45 @@ signed int ReGBA_AudioUpdate()
 	}
 
 	dst_ptr = audio_buff; // left (stereo)
-	dst_ptr1 = dst_ptr + (int) (AUDIO_LEN / OUTPUT_FREQUENCY_DIVISOR); // right (stereo)
+	dst_ptr1 = dst_ptr + AUDIO_LEN; // right (stereo)
 
-	for(i= 0; i < AUDIO_LEN; i += OUTPUT_FREQUENCY_DIVISOR)
+	if (reg[CPU_HALT_STATE] != CPU_STOP)
 	{
-		s16 Left = 0, Right = 0, LeftPart, RightPart;
-		for (j = 0; j < OUTPUT_FREQUENCY_DIVISOR; j++) {
-			ReGBA_LoadNextAudioSample(&LeftPart, &RightPart);
+		for (i= 0; i < AUDIO_LEN; i++)
+		{
+			s16 Left = 0, Right = 0, LeftPart, RightPart;
+			for (j = 0; j < OUTPUT_FREQUENCY_DIVISOR; j++) {
+				ReGBA_LoadNextAudioSample(&LeftPart, &RightPart);
 
-			if      (LeftPart >  2047) LeftPart =  2047;
-			else if (LeftPart < -2048) LeftPart = -2048;
-			Left += LeftPart / OUTPUT_FREQUENCY_DIVISOR;
+				if      (LeftPart >  2047) LeftPart =  2047;
+				else if (LeftPart < -2048) LeftPart = -2048;
+				Left += LeftPart / OUTPUT_FREQUENCY_DIVISOR;
 
-			if      (RightPart >  2047) RightPart =  2047;
-			else if (RightPart < -2048) RightPart = -2048;
-			Right += RightPart / OUTPUT_FREQUENCY_DIVISOR;
+				if      (RightPart >  2047) RightPart =  2047;
+				else if (RightPart < -2048) RightPart = -2048;
+				Right += RightPart / OUTPUT_FREQUENCY_DIVISOR;
+			}
+			*dst_ptr++ = Left << 4;
+			*dst_ptr1++ = Right << 4;
 		}
-		*dst_ptr++ = Left << 4;
-		*dst_ptr1++ = Right << 4;
+	}
+	else
+	{
+		for (i= 0; i < AUDIO_LEN; i++)
+		{
+			*dst_ptr++ = 0;
+			*dst_ptr1++ = 0;
+		}
 	}
 
 	if (game_fast_forward || temporary_fast_forward)
 	{
 		// Dampen the sound with the previous samples written
 		// (or unitialised data if we just started the emulator)
-		StartFastForwardedSound(audio_buff,
-			&audio_buff[(int) (AUDIO_LEN / OUTPUT_FREQUENCY_DIVISOR)]);
+		StartFastForwardedSound(audio_buff, &audio_buff[AUDIO_LEN]);
 		// Store the end for the next time
-		EndFastForwardedSound(&audio_buff[(int) (AUDIO_LEN / OUTPUT_FREQUENCY_DIVISOR) - DAMPEN_SAMPLE_COUNT],
-			&audio_buff[(int) (AUDIO_LEN / OUTPUT_FREQUENCY_DIVISOR) * 2 - DAMPEN_SAMPLE_COUNT]);
+		EndFastForwardedSound(&audio_buff[AUDIO_LEN - DAMPEN_SAMPLE_COUNT],
+			&audio_buff[AUDIO_LEN * 2 - DAMPEN_SAMPLE_COUNT]);
 	}
 
 	Stats.InSoundBufferUnderrun = 0;

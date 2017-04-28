@@ -47,12 +47,12 @@ typedef struct
   tile_render_function color16_render_transparent;
   tile_render_function color32_render_base;
   tile_render_function color32_render_transparent;
-} tile_layer_render_struct;
+} TileLayerRenderStruct;
 
 typedef struct
 {
   bitmap_render_function normal_render;
-} bitmap_layer_render_struct;
+} BitmapLayerRenderStruct;
 
 void video_read_mem_savestate();
 void video_write_mem_savestate();

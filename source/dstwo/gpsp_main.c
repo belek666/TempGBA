@@ -13,134 +13,34 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- *s
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/******************************************************************************
- * 头文件
- ******************************************************************************/
 #include "common.h"
 
-//PSP_MODULE_INFO("gpSP", PSP_MODULE_USER, VERSION_MAJOR, VERSION_MINOR);
-//PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER|PSP_THREAD_ATTR_VFPU);
-//PSP_MAIN_THREAD_PRIORITY(0x11);
-//PSP_MAIN_THREAD_STACK_SIZE_KB(640);
-//PSP_HEAP_SIZE_MAX();
-
-/******************************************************************************
- * 全局变量定义
- ******************************************************************************/
-
-u32 global_cycles_per_instruction = 1;
-//u64 frame_count_initial_timestamp = 0;
-//u64 last_frame_interval_timestamp;
-u32 psp_fps_debug = 0;
 u32 skip_next_frame_flag = 0;
 u32 frameskip_0_hack_flag = 0;
-//u32 frameskip_counter = 0;
 
 u32 cpu_ticks = 0;
 u32 frame_ticks = 0;
 
 u32 execute_cycles = 960;
 s32 video_count = 960;
-//u32 ticks;
 
-//u32 arm_frame = 0;
-//u32 thumb_frame = 0;
-u32 last_frame = 0;
+u32 irq_ticks = 0;
+u8 cpu_init_state = 0;
 
-u32 synchronize_flag = 1;
-
-//vu32 quit_flag;
-vu32 power_flag;
-
-vu32 real_frame_count = 0;
-u32 virtual_frame_count = 0;
-vu32 vblank_count = 0;
-u32 num_skipped_frames = 0;
-u32 frames;
+u32 dma_cycle_count = 0;
 
 unsigned int pen = 0;
 unsigned int frame_interval = 60; // For in-memory saved states used in rewinding
 
-int date_format= 2;
+u32 to_skip= 0;
 
 char *file_ext[] = { ".gba", ".bin", ".zip", NULL };
-
-/******************************************************************************
- * 宏定义
- ******************************************************************************/
-
-// 决定仿真周期
-#define CHECK_COUNT(count_var)                                                \
-  if((count_var) < execute_cycles)                                            \
-    execute_cycles = count_var;                                               \
-
-#define CHECK_TIMER(timer_number)                                             \
-  if(timer[timer_number].status == TIMER_PRESCALE)                            \
-    CHECK_COUNT(timer[timer_number].count);                                   \
-
-// 更新定时器
-//实际范围是0~0xFFFF，但是gpSP内部是(0x10000~1)<<prescale(0,6,8,10)的权值
-#define update_timer(timer_number)                                            \
-  if(timer[timer_number].status != TIMER_INACTIVE)                            \
-  {                                                                           \
-    /* 如果是使用中的定时器 */												  \
-    if(timer[timer_number].status != TIMER_CASCADE)                           \
-    {                                                                         \
-      /* 如果定时器没有级联 */                                                \
-      /* 改变定时器的计数值 */                                                \
-      timer[timer_number].count -= execute_cycles;                            \
-      /* 保存计数值 */                                                        \
-      io_registers[REG_TM##timer_number##D] =                                 \
-      0x10000 - (timer[timer_number].count >> timer[timer_number].prescale);  \
-    }                                                                         \
-                                                                              \
-    if(timer[timer_number].count <= 0)                                        \
-    {                                                                         \
-      /* 如果定时器溢出 */                                                    \
-      /* 是否触发中断 */                                                      \
-      if(timer[timer_number].irq == TIMER_TRIGGER_IRQ)                        \
-        irq_raised |= IRQ_TIMER##timer_number;                                \
-                                                                              \
-      if((timer_number != 3) &&                                               \
-       (timer[timer_number + 1].status == TIMER_CASCADE))                     \
-      {                                                                       \
-        /* 定时器0～2 如果在定时器级联模式下 */                               \
-        /* 改变定时器的计数值 */                                              \
-        timer[timer_number + 1].count--;                                      \
-        /* 保存计数值 */                                                      \
-        io_registers[REG_TM0D + (timer_number + 1) * 2] =                     \
-        0x10000 - (timer[timer_number + 1].count);                            \
-      }                                                                       \
-                                                                              \
-      if(timer_number < 2)                                                    \
-      {                                                                       \
-        if(timer[timer_number].direct_sound_channels & 0x01)                  \
-          sound_timer(timer[timer_number].frequency_step, 0);                 \
-                                                                              \
-        if(timer[timer_number].direct_sound_channels & 0x02)                  \
-          sound_timer(timer[timer_number].frequency_step, 1);                 \
-      }                                                                       \
-                                                                              \
-      /* 加载定时器 */                                                        \
-      timer[timer_number].count +=                                            \
-        (timer[timer_number].reload << timer[timer_number].prescale);         \
-      io_registers[REG_TM##timer_number##D] =                                 \
-      0x10000 - (timer[timer_number].count >> timer[timer_number].prescale);  \
-    }                                                                         \
-  }                                                                           \
-
-// 局部函数声明
-void vblank_interrupt_handler(u32 sub, u32 *parg);
-void init_main();
-int main(int argc, char *argv[]);
-void print_memory_stats(u32 *counter, u32 *region_stats, u8 *stats_str);
-u32 into_suspend();
 
 static u8 caches_inited = 0;
 
@@ -151,24 +51,30 @@ void init_main()
   skip_next_frame_flag = 0;
   frameskip_0_hack_flag = 0;
 
-  for(i = 0; i < 4; i++)
+  for (i = 0; i < 4; i++)
   {
+    memset(&dma[i], 0, sizeof(DmaTransferType));
+
     dma[i].start_type = DMA_INACTIVE;
     dma[i].direct_sound_channel = DMA_NO_DIRECT_SOUND;
+
+    memset(&timer[i], 0, sizeof(TimerType));
+
     timer[i].status = TIMER_INACTIVE;
     timer[i].reload = 0x10000;
+    timer[i].direct_sound_channels = TIMER_DS_CHANNEL_NONE;
   }
-
-  timer[0].direct_sound_channels = TIMER_DS_CHANNEL_BOTH;
-  timer[1].direct_sound_channels = TIMER_DS_CHANNEL_NONE;
 
   cpu_ticks = 0;
   frame_ticks = 0;
 
-  execute_cycles = 960;
-  video_count = 960;
+  execute_cycles = gpsp_persistent_config.BootFromBIOS ? 960 : 272;
+  video_count = execute_cycles;
 
-  // bios_mode = USE_BIOS;
+  dma_cycle_count = 0;
+
+  irq_ticks = 0;
+  cpu_init_state = 0;
 
   if (!caches_inited)
   {
@@ -208,15 +114,6 @@ void quit(void)
 	while(1);
 }
 
-/*
-void sceKernelRegisterSubIntrHandler(void* func, void* para)
-{
-
-}
-*/
-
-int plug_valid= 0;
-
 int gpsp_main(int argc, char *argv[])
 {
 	char load_filename[MAX_FILE];
@@ -227,7 +124,6 @@ int gpsp_main(int argc, char *argv[])
 	initial_gpsp_config();
 
     init_video();
-	power_flag = 0;
 
 	// 初始化
 	init_game_config();
@@ -253,135 +149,225 @@ int gpsp_main(int argc, char *argv[])
 
 	ReGBA_Menu(REGBA_MENU_ENTRY_REASON_NO_ROM);
 
-	last_frame = 0;
-
-	real_frame_count = 0;
-	virtual_frame_count = 0;
-
-#ifdef USE_C_CORE
-	if(gpsp_config.emulate_core == ASM_CORE)
-	{
-		execute_arm_translate(execute_cycles);
-	}
-	else
-	{
-		execute_arm(execute_cycles);
-	}
-#else
 	execute_arm_translate(execute_cycles);
-#endif
 
 	return 0;
 }
 
-u32 sync_flag = 0;
 
-#define V_BLANK   (0x01)
-#define H_BLANK   (0x02)
-#define V_COUNTER (0x04)
-
-// video_count的初始值是960(行显示时钟周期)
-//#define SKIP_RATE 2
-//u32 SKIP_RATE= 2;
-u32 to_skip= 0;
-
-u32 update_gba()
+static void timer_control(u8 timer_number, u32 value)
 {
-  // TODO このあたりのログをとる必要があるかも
+  TimerType *tm = timer + timer_number;
+
+  if ((value & 0x80) != 0)
+  {
+    if (tm->status == TIMER_INACTIVE)
+    {
+      if ((value & 0x04) != 0)
+      {
+        tm->status = TIMER_CASCADE;
+        tm->prescale = 0;
+      }
+      else
+      {
+        tm->status = TIMER_PRESCALE;
+        tm->prescale = timer_prescale_table[value & 0x03];
+      }
+
+      tm->irq = (value >> 6) & 0x01;
+
+      u32 timer_reload = tm->reload;
+
+      io_registers[REG_TM0D + (timer_number << 1)] = 0x10000 - timer_reload;
+
+      timer_reload <<= tm->prescale;
+      tm->count = timer_reload;
+
+      if (timer_number < 2)
+      {
+        tm->frequency_step = FLOAT_TO_FP08_24((SYS_CLOCK / SOUND_FREQUENCY) / timer_reload);
+        tm->reload_update = 0;
+
+        if ((tm->direct_sound_channels & 0x01) != 0)
+          adjust_direct_sound_buffer(0, cpu_ticks + timer_reload);
+
+        if ((tm->direct_sound_channels & 0x02) != 0)
+          adjust_direct_sound_buffer(1, cpu_ticks + timer_reload);
+      }
+    }
+  }
+  else
+  {
+    tm->status = TIMER_INACTIVE;
+  }
+}
+
+#define CHECK_COUNT(count_var)                                                \
+  if ((count_var) < execute_cycles)                                           \
+  {                                                                           \
+    execute_cycles = count_var;                                               \
+  }                                                                           \
+
+#define CHECK_TIMER(timer_number)                                             \
+  if (timer[timer_number].status == TIMER_PRESCALE)                           \
+  {                                                                           \
+    CHECK_COUNT(timer[timer_number].count);                                   \
+  }                                                                           \
+
+#define UPDATE_TIMER(timer_number)                                            \
+{                                                                             \
+  TimerType *tm = timer + timer_number;                                       \
+                                                                              \
+  if (tm->status != TIMER_INACTIVE)                                           \
+  {                                                                           \
+    if (tm->status != TIMER_CASCADE)                                          \
+    {                                                                         \
+      tm->count -= execute_cycles;                                            \
+    }                                                                         \
+                                                                              \
+    if (tm->count <= 0)                                                       \
+    {                                                                         \
+      if (tm->irq == TIMER_TRIGGER_IRQ)                                       \
+      {                                                                       \
+        irq_raised |= IRQ_TIMER##timer_number;                                \
+      }                                                                       \
+                                                                              \
+      if (timer_number != 3)                                                  \
+      {                                                                       \
+        if (tm[1].status == TIMER_CASCADE)                                    \
+          tm[1].count--;                                                      \
+      }                                                                       \
+                                                                              \
+      u32 timer_reload = tm->reload << tm->prescale;                          \
+                                                                              \
+      if (timer_number < 2)                                                   \
+      {                                                                       \
+        if ((tm->direct_sound_channels & 0x01) != 0)                          \
+          sound_timer(tm->frequency_step, 0);                                 \
+                                                                              \
+        if ((tm->direct_sound_channels & 0x02) != 0)                          \
+          sound_timer(tm->frequency_step, 1);                                 \
+                                                                              \
+        if (tm->reload_update != 0)                                           \
+        {                                                                     \
+          tm->frequency_step = FLOAT_TO_FP08_24((SYS_CLOCK / SOUND_FREQUENCY) / timer_reload); \
+          tm->reload_update = 0;                                              \
+        }                                                                     \
+     }                                                                        \
+                                                                              \
+      tm->count += timer_reload;                                              \
+    }                                                                         \
+                                                                              \
+    io_registers[REG_TM##timer_number##D] = 0x10000 - (tm->count >> tm->prescale); \
+  }                                                                           \
+                                                                              \
+  if (tm->control_update != 0)                                                \
+  {                                                                           \
+    timer_control(timer_number, tm->control_value);                           \
+    tm->control_update = 0;                                                   \
+  }                                                                           \
+}                                                                             \
+
+#define START_DMA_TRANSFER(channel, start_timing)                             \
+  if (dma[channel].start_type == DMA_START_##start_timing)                    \
+  {                                                                           \
+    dma_transfer(dma + channel);                                              \
+  }                                                                           \
+
+
+#define SOUND_CLOCK_TICKS (167772)  // 1/100 second
+int sound_ticks = SOUND_CLOCK_TICKS;
+
+u32 update_gba(void)
+{
+  s32 i;
   IRQ_TYPE irq_raised = IRQ_NONE;
 
   do
+  {
+    cpu_dma_hack = 0;
+
+    during_dma_transfer_loop:
+
+    cpu_ticks += execute_cycles;
+
+    sound_ticks -= execute_cycles;
+
+    if (sound_ticks <= 0)
     {
-      cpu_ticks += execute_cycles;
+      update_gbc_sound(cpu_ticks);
+      sound_ticks += SOUND_CLOCK_TICKS;
+    }
 
-      reg[CHANGED_PC_STATUS] = 0;
-
-      if(gbc_sound_update)
-        {
-//printf("update sound\n");
-          update_gbc_sound(cpu_ticks);
-          gbc_sound_update = 0;
-        }
-
-    update_timer(0);
-    update_timer(1);
-    update_timer(2);
-    update_timer(3);
+    UPDATE_TIMER(0);
+    UPDATE_TIMER(1);
+    UPDATE_TIMER(2);
+    UPDATE_TIMER(3);
 
     video_count -= execute_cycles;
 
-    if(video_count <= 0)
-    { // 状態移行の発生
+    if (video_count <= 0)
+    {
       u32 vcount = io_registers[REG_VCOUNT];
       u32 dispstat = io_registers[REG_DISPSTAT];
 
-      if(!(dispstat & H_BLANK))
-      { // 非 H BLANK
-        // 转 H BLANK
+      if (!(dispstat & 0x02))
+      {
+        // Transition from hrefresh to hblank
         video_count += 272;
-        dispstat |= H_BLANK; // 设置 H BLANK
+        dispstat |= 0x02;
 
-        if((dispstat & 0x01) == 0)
-        { // 非 V BLANK
-          // 无跳帧时
+        if (!(dispstat & 0x01))
+        {
           update_scanline();
 
           // If in visible area also fire HDMA
-          if(dma[0].start_type == DMA_START_HBLANK)
-            dma_transfer(dma);
-          if(dma[1].start_type == DMA_START_HBLANK)
-            dma_transfer(dma + 1);
-          if(dma[2].start_type == DMA_START_HBLANK)
-            dma_transfer(dma + 2);
-          if(dma[3].start_type == DMA_START_HBLANK)
-            dma_transfer(dma + 3);
-
-          if(dispstat & 0x10)
-            irq_raised |= IRQ_HBLANK; // HBLANK 中断不会发生在 VBLANK 中
+          for (i = 0; i < 4; i++)
+          {
+            START_DMA_TRANSFER(i, HBLANK);
+          }
         }
 
-      } // 非 HBLANK
+        // H-blank interrupts do occur during v-blank (unlike hdma, which does not)
+        if ((dispstat & 0x10) != 0)
+          irq_raised |= IRQ_HBLANK;
+      }
       else
-      { // HBLANK
-        // 场扫描增加一行
+      {
+        // Transition from hblank to next line
         video_count += 960;
-        dispstat &= ~H_BLANK;
+        dispstat &= ~0x02;
 
         vcount++;
 
-        if(vcount == 160)
+        if (vcount == 160)
         {
+          // Transition from vrefresh to vblank
           dispstat |= 0x01;
-          if(dispstat & 0x8)
-            irq_raised |= IRQ_VBLANK;
+
+          if (update_input() != 0)
+            continue;
 
           affine_reference_x[0] = (s32)(ADDRESS32(io_registers, 0x28) << 4) >> 4;
           affine_reference_y[0] = (s32)(ADDRESS32(io_registers, 0x2C) << 4) >> 4;
           affine_reference_x[1] = (s32)(ADDRESS32(io_registers, 0x38) << 4) >> 4;
           affine_reference_y[1] = (s32)(ADDRESS32(io_registers, 0x3C) << 4) >> 4;
 
-          if(dma[0].start_type == DMA_START_VBLANK)
-            dma_transfer(dma);
-          if(dma[1].start_type == DMA_START_VBLANK)
-            dma_transfer(dma + 1);
-          if(dma[2].start_type == DMA_START_VBLANK)
-            dma_transfer(dma + 2);
-          if(dma[3].start_type == DMA_START_VBLANK)
-            dma_transfer(dma + 3);
+          for (i = 0; i < 4; i++)
+          {
+            START_DMA_TRANSFER(i, VBLANK);
+          }
 
+          if ((dispstat & 0x08) != 0)
+            irq_raised |= IRQ_VBLANK;
        }
-       else if(vcount == 228)
-	   {
+       else if (vcount == 228)
+       {
           // Transition from vblank to next screen
           dispstat &= ~0x01;
           frame_ticks++;
 			if(frame_ticks >= frame_interval)
 				frame_ticks = 0;
-
-//          sceKernelDelayThread(10);
-
-          if(update_input() != 0)
-            continue;
 
 			if(game_config.backward)
 			{
@@ -419,42 +405,30 @@ u32 update_gba()
 					savestate_rewind();
 				}
 			}
-#if 0
-          if((power_flag == 1) && (into_suspend() != 0))
-            continue;
-#endif
 
-          update_backup();
+          if (gpsp_persistent_config.UpdateBackup != 0)
+            update_backup();
 
           process_cheats();
 
           update_gbc_sound(cpu_ticks);
+          ReGBA_AudioUpdate();
 
-          vcount = 0; // TODO vcountを0にするタイミングを検討
+          vcount = 0;
 
-          //TODO 調整必要
-//          if((video_out_mode == 0) || (gpsp_config.screen_interlace == PROGRESSIVE))
-//            synchronize();
-//          else
-//          {
-//            if(sync_flag == 0)
-//              synchronize();
-//            sync_flag ^= 1;
-//         }
-
-            Stats.EmulatedFrames++;
-            Stats.TotalEmulatedFrames++;
-            ReGBA_RenderScreen();
+          Stats.EmulatedFrames++;
+          Stats.TotalEmulatedFrames++;
+          ReGBA_RenderScreen();
 
 //printf("SKIP_RATE %d %d\n", SKIP_RATE, to_skip);
         } //(vcount == 228)
 
-        // vcountによる割込
-        if(vcount == (dispstat >> 8))
+        if (vcount == (dispstat >> 8))
         {
           // vcount trigger
           dispstat |= 0x04;
-          if(dispstat & 0x20)
+
+          if ((dispstat & 0x20) != 0)
           {
             irq_raised |= IRQ_VCOUNT;
           }
@@ -466,33 +440,77 @@ u32 update_gba()
 
         io_registers[REG_VCOUNT] = vcount;
       }
+
       io_registers[REG_DISPSTAT] = dispstat;
     }
 
     execute_cycles = video_count;
 
-    if(irq_raised)
-      raise_interrupt(irq_raised);
+    CHECK_COUNT((u32)sound_ticks);
 
-    CHECK_TIMER(0);
-    CHECK_TIMER(1);
-    CHECK_TIMER(2);
-    CHECK_TIMER(3);
+    for (i = 0; i < 4; i++)
+    {
+      CHECK_TIMER(i);
+    }
 
-//        synchronize_sound();
-    // 画面のシンクロ・フリップ・ウェイト処理はここで行うべきでは？
+    if (dma_cycle_count != 0)
+    {
+      CHECK_COUNT(dma_cycle_count);
+      dma_cycle_count -= execute_cycles;
 
-  } while(reg[CPU_HALT_STATE] != CPU_ACTIVE);
+      goto during_dma_transfer_loop;
+    }
+
+    if (irq_raised != IRQ_NONE)
+    {
+      ADDRESS16(io_registers, 0x202) |= irq_raised;
+      irq_raised = IRQ_NONE;
+    }
+
+    if ((io_registers[REG_IF] != 0) && GBA_IME_STATE && ARM_IRQ_STATE)
+    {
+      u16 irq_mask = (reg[CPU_HALT_STATE] == CPU_STOP) ? 0x3080 : 0x3FFF;
+
+      if ((io_registers[REG_IE] & io_registers[REG_IF] & irq_mask) != 0)
+      {
+        if (cpu_init_state != 0)
+        {
+          if (irq_ticks == 0)
+          {
+            cpu_interrupt();
+            cpu_init_state = 0;
+          }
+        }
+        else
+        {
+          if (reg[CPU_HALT_STATE] == CPU_HALT)
+          {
+            cpu_interrupt();
+          }
+          else
+          {
+            // IRQ delay - Tsyncmax=3, Texc=3, Tirq=2, Tldm=20
+            //             Tsyncmin=2
+            irq_ticks = 9;
+            cpu_init_state = 1;
+          }
+        }
+      }
+    }
+
+    if (irq_ticks != 0)
+    {
+      CHECK_COUNT(irq_ticks);
+      irq_ticks -= execute_cycles;
+    }
+  }
+  while(reg[CPU_HALT_STATE] != CPU_ACTIVE);
+
   return execute_cycles;
 }
 
-void vblank_interrupt_handler(u32 sub, u32 *parg)
-{
-  real_frame_count++;
-  vblank_count++;
-}
 
-void reset_gba()
+void reset_gba(void)
 {
   init_main();
   init_memory();
@@ -516,13 +534,19 @@ void change_ext(char *src, char *buffer, char *extension)
   FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_ticks);                      \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, execute_cycles);                 \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, video_count);                    \
+                                                                              \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_init_state);                 \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, irq_ticks);                      \
+                                                                              \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, dma_cycle_count);                \
+                                                                              \
   FILE_##type##_ARRAY(g_state_buffer_ptr, timer);                             \
 }                                                                             \
 
-void main_read_mem_savestate()
+void main_read_mem_savestate(void)
 MAIN_SAVESTATE_BODY(READ_MEM);
 
-void main_write_mem_savestate()
+void main_write_mem_savestate(void)
 MAIN_SAVESTATE_BODY(WRITE_MEM);
 
 void error_msg(char *text)
@@ -538,24 +562,6 @@ void error_msg(char *text)
     }
 }
 
-#if 0
-MODEL_TYPE get_model()
-{
-  if((kuKernelGetModel() <= 0 /* original PSP */) || ( gpsp_config.fake_fat == YES))
-  {
-    return PSP_1000;
-  }
-  else
-    if(sceKernelDevkitVersion() < 0x03070110 || sctrlSEGetVersion() < 0x00001012)
-    {
-      return PSP_1000;
-    }
-    else
-    {
-      return PSP_2000;
-    }
-}
-#endif
 
 char* FS_FGets(char *buffer, int num, FILE_TAG_TYPE stream)
 {

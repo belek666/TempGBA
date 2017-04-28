@@ -23,7 +23,6 @@
 // - block memory needs psr swapping and user mode reg swapping
 
 #include "common.h"
-#include "cpu_common.h"
   
 // When a mode change occurs from non-FIQ to non-FIQ retire the current
 // reg[13] and reg[14] into reg_mode[cpu_mode][5] and reg_mode[cpu_mode][6]
@@ -38,9 +37,37 @@
 #define EXPAND_AS_STRING(x) AS_STRING(x)
 #define AS_STRING(x) #x
 
-u32 reg_mode[7][7];
- 
-const u8 cpu_modes[32] =
+const u8 ALIGN_DATA bit_count[256] =
+{
+  0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
+  1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+  1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+  1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+  2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6,
+  3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+  3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
+  4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8
+};
+
+const u32 ALIGN_DATA psr_masks[16] =
+{
+  0x00000000, 0x000000FF, 0x0000FF00, 0x0000FFFF,
+  0x00FF0000, 0x00FF00FF, 0x00FFFF00, 0x00FFFFFF,
+  0xFF000000, 0xFF0000FF, 0xFF00FF00, 0xFF00FFFF,
+  0xFFFF0000, 0xFFFF00FF, 0xFFFFFF00, 0xFFFFFFFF
+};
+
+u32 ALIGN_DATA reg_mode[7][7];
+
+const CPU_MODE_TYPE ALIGN_DATA cpu_modes[32] =
 {
   MODE_INVALID, MODE_INVALID, MODE_INVALID, MODE_INVALID,
   MODE_INVALID, MODE_INVALID, MODE_INVALID, MODE_INVALID,
@@ -52,30 +79,17 @@ const u8 cpu_modes[32] =
   MODE_INVALID, MODE_INVALID, MODE_INVALID, MODE_USER
 };
 
-const u8 cpu_modes_cpsr[7] = { 0x10, 0x11, 0x12, 0x13, 0x17, 0x1B, 0x1F };
-
 // When switching modes set spsr[new_mode] to cpsr. Modifying PC as the
 // target of a data proc instruction will set cpsr to spsr[cpu_mode].
-u32 spsr[6];
+u32 ALIGN_DATA spsr[6];
 
-// ARM/Thumb mode is stored in the flags directly, this is simpler than
-// shadowing it since it has a constant 1bit represenation.
-
-char *reg_names[16] =
-{
-  " r0", " r1", " r2", " r3", " r4", " r5", " r6", " r7",
-  " r8", " r9", "r10", " fp", " ip", " sp", " lr", " pc"
-};
-
-u32 output_field = 0;
-
-u32 last_instruction = 0;
-
-struct ReuseHeader {
-	struct ReuseHeader* Next;
+struct _ReuseHeader {
+	struct _ReuseHeader *Next;
 	uint32_t PC;
 	uint32_t GBACodeSize;
 };
+
+typedef struct _ReuseHeader ReuseHeader;
 
 /* These represent code caches. */
 __attribute__((aligned(CODE_ALIGN_SIZE)))
@@ -88,7 +102,7 @@ u8* writable_next_code = writable_code_cache;
 
 /* These represent Metadata Areas. */
 u32 *rom_branch_hash[ROM_BRANCH_HASH_SIZE];
-struct ReuseHeader* writable_checksum_hash[WRITABLE_HASH_SIZE];
+ReuseHeader *writable_checksum_hash[WRITABLE_HASH_SIZE];
 
 u8 *iwram_block_ptrs[MAX_TAG_IWRAM + 1];
 u32 iwram_block_tag_top = MIN_TAG;
@@ -112,11 +126,6 @@ u32 idle_loop_targets = 0;
 u32 idle_loop_target_pc[MAX_IDLE_LOOPS];
 u32 force_pc_update_target = 0xFFFFFFFF;
 u32 iwram_stack_optimize = 1;
-//u32 allow_smc_ram_u8 = 1;
-//u32 allow_smc_ram_u16 = 1;
-//u32 allow_smc_ram_u32 = 1;
-
-// u32 bios_mode;
 
 typedef struct
 {
@@ -124,49 +133,107 @@ typedef struct
   u16 flag_data;
   u8 condition;
   u8 update_cycles;
-} block_data_arm_type;
+} BlockDataArmType;
 
 typedef struct
 {
   u8 *block_offset;
   u16 flag_data;
   u8 update_cycles;
-} block_data_thumb_type;
+} BlockDataThumbType;
 
 typedef struct
 {
   u32 branch_target;
   u8 *branch_source;
-} block_exit_type;
+} BlockExitType;
 
 #define arm_decode_data_proc_reg()                                            \
   u32 rn = (opcode >> 16) & 0x0F;                                             \
   u32 rd = (opcode >> 12) & 0x0F;                                             \
-  u32 rm = opcode & 0x0F                                                      \
+  u32 rm = opcode & 0x0F;                                                     \
+
+#define arm_decode_data_proc_reg_flags()                                      \
+  arm_decode_data_proc_reg()                                                  \
 
 #define arm_decode_data_proc_imm()                                            \
   u32 rn = (opcode >> 16) & 0x0F;                                             \
   u32 rd = (opcode >> 12) & 0x0F;                                             \
   u32 imm;                                                                    \
-  ROR(imm, opcode & 0xFF, (opcode >> 7) & 0x1E)                               \
+  ROR(imm, (opcode & 0xFF), ((opcode & 0xF00) >> 7));                         \
 
-#define arm_decode_psr_reg()                                                  \
-  u32 psr_field = (opcode >> 16) & 0x0F;                                      \
-  u32 rd = (opcode >> 12) & 0x0F;                                             \
-  u32 rm = opcode & 0x0F                                                      \
-
-#define arm_decode_psr_imm()                                                  \
-  u32 psr_field = (opcode >> 16) & 0x0F;                                      \
+#define arm_decode_data_proc_imm_flags()                                      \
+  u32 rn = (opcode >> 16) & 0x0F;                                             \
   u32 rd = (opcode >> 12) & 0x0F;                                             \
   u32 imm;                                                                    \
-  ROR(imm, opcode & 0xFF, (opcode >> 7) & 0x1E)                               \
+  u32 op2_imm = opcode & 0xFF;                                                \
+  u32 shift = (opcode & 0xF00) >> 7;                                          \
+  ROR(imm, op2_imm, shift);                                                   \
+
+#define arm_decode_data_proc_test_reg()                                       \
+  u32 rn = (opcode >> 16) & 0x0F;                                             \
+  u32 rm = opcode & 0x0F;                                                     \
+
+#define arm_decode_data_proc_test_reg_flags()                                 \
+  arm_decode_data_proc_test_reg()                                             \
+
+#define arm_decode_data_proc_test_imm()                                       \
+  u32 rn = (opcode >> 16) & 0x0F;                                             \
+  u32 imm;                                                                    \
+  ROR(imm, (opcode & 0xFF), ((opcode & 0xF00) >> 7));                         \
+
+#define arm_decode_data_proc_test_imm_flags()                                 \
+  u32 rn = (opcode >> 16) & 0x0F;                                             \
+  u32 imm;                                                                    \
+  u32 op2_imm = opcode & 0xFF;                                                \
+  u32 shift = (opcode & 0xF00) >> 7;                                          \
+  ROR(imm, op2_imm, shift);                                                   \
+
+#define arm_decode_data_proc_unary_reg()                                      \
+  u32 rd = (opcode >> 12) & 0x0F;                                             \
+  u32 rm = opcode & 0x0F;                                                     \
+
+#define arm_decode_data_proc_unary_reg_flags()                                \
+  arm_decode_data_proc_unary_reg()                                            \
+
+#define arm_decode_data_proc_unary_imm()                                      \
+  u32 rd = (opcode >> 12) & 0x0F;                                             \
+  u32 imm;                                                                    \
+  ROR(imm, (opcode & 0xFF), ((opcode & 0xF00) >> 7));                         \
+
+#define arm_decode_data_proc_unary_imm_flags()                                \
+  u32 rd = (opcode >> 12) & 0x0F;                                             \
+  u32 imm;                                                                    \
+  u32 op2_imm = opcode & 0xFF;                                                \
+  u32 shift = (opcode & 0xF00) >> 7;                                          \
+  ROR(imm, op2_imm, shift);                                                   \
+
+#define arm_decode_psr_read_reg()                                             \
+  u32 rd = (opcode >> 12) & 0x0F;                                             \
+
+#define arm_decode_psr_read_imm()                                             \
+  arm_decode_psr_read_reg()                                                   \
+
+#define arm_decode_psr_store_reg()                                            \
+  u32 psr_field = (opcode >> 16) & 0x0F;                                      \
+  u32 rm = opcode & 0x0F;                                                     \
+
+#define arm_decode_psr_store_imm()                                            \
+  u32 psr_field = (opcode >> 16) & 0x0F;                                      \
+  u32 imm;                                                                    \
+  ROR(imm, (opcode & 0xFF), ((opcode & 0xF00) >> 7));                         \
 
 #define arm_decode_branchx()                                                  \
   u32 rn = opcode & 0x0F                                                      \
 
-#define arm_decode_multiply()                                                 \
+#define arm_decode_multiply_add_yes()                                         \
   u32 rd = (opcode >> 16) & 0x0F;                                             \
   u32 rn = (opcode >> 12) & 0x0F;                                             \
+  u32 rs = (opcode >> 8) & 0x0F;                                              \
+  u32 rm = opcode & 0x0F                                                      \
+
+#define arm_decode_multiply_add_no()                                          \
+  u32 rd = (opcode >> 16) & 0x0F;                                             \
   u32 rs = (opcode >> 8) & 0x0F;                                              \
   u32 rm = opcode & 0x0F                                                      \
 
@@ -224,7 +291,8 @@ typedef struct
   u32 rd = opcode & 0x07                                                      \
 
 #define thumb_decode_imm()                                                    \
-  u32 imm = opcode & 0xFF                                                     \
+  u32 imm = opcode & 0xFF;                                                    \
+  u32 rd = (opcode >> 8) & 0x07;                                              \
 
 #define thumb_decode_alu_op()                                                 \
   u32 rs = (opcode >> 3) & 0x07;                                              \
@@ -262,7 +330,7 @@ typedef struct
 extern void call_bios_hle(void* func);
 
 #define check_pc_region(pc)                                                   \
-  new_pc_region = (pc >> 15);                                                 \
+  new_pc_region = (pc) >> 15;                                                 \
   if(new_pc_region != pc_region)                                              \
   {                                                                           \
     pc_region = new_pc_region;                                                \
@@ -321,21 +389,27 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
   }                                                                           \
                                                                               \
   StatsAddARMOpcode();                                                        \
+  arm_base_cycles();                                                          \
                                                                               \
-  switch((opcode >> 20) & 0xFF)                                               \
+  switch ((opcode >> 20) & 0xFF)                                              \
   {                                                                           \
     case 0x00:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], -rm */                                            \
-          arm_access_memory(store, down, post, u16, half_reg);                \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* MUL rd, rm, rs */                                                \
-          arm_multiply(no, no);                                               \
+          case 0:                                                             \
+            /* MUL rd, rm, rs */                                              \
+            arm_multiply(no, no);                                             \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], -rm */                                          \
+            arm_access_memory(store, down, post, u16, half_reg);              \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -346,7 +420,7 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x01:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
         switch((opcode >> 5) & 0x03)                                          \
         {                                                                     \
@@ -379,17 +453,22 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x02:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], -rm */                                            \
-          arm_access_memory(store, down, post, u16, half_reg);                \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* MLA rd, rm, rs, rn */                                            \
-          arm_multiply(yes, no);                                              \
+          case 0:                                                             \
+            /* MLA rd, rm, rs, rn */                                          \
+            arm_multiply(yes, no);                                            \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], -rm */                                          \
+            arm_access_memory(store, down, post, u16, half_reg);              \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -400,7 +479,7 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x03:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
         switch((opcode >> 5) & 0x03)                                          \
         {                                                                     \
@@ -433,10 +512,15 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x04:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn], -imm */                                             \
-        arm_access_memory(store, down, post, u16, half_imm);                  \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn], -imm */                                           \
+          arm_access_memory(store, down, post, u16, half_imm);                \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
@@ -446,10 +530,13 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x05:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn], -imm */                                         \
             arm_access_memory(load, down, post, u16, half_imm);               \
@@ -474,10 +561,15 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x06:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn], -imm */                                             \
-        arm_access_memory(store, down, post, u16, half_imm);                  \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn], -imm */                                           \
+          arm_access_memory(store, down, post, u16, half_imm);                \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
@@ -487,10 +579,13 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x07:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn], -imm */                                         \
             arm_access_memory(load, down, post, u16, half_imm);               \
@@ -515,17 +610,22 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x08:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], +rm */                                            \
-          arm_access_memory(store, up, post, u16, half_reg);                  \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* UMULL rd, rm, rs */                                              \
-          arm_multiply_long(u64, no, no);                                     \
+          case 0:                                                             \
+            /* UMULL rd, rm, rs */                                            \
+            arm_multiply_long(u64, no, no);                                   \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], +rm */                                          \
+            arm_access_memory(store, up, post, u16, half_reg);                \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -536,9 +636,9 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x09:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
           case 0:                                                             \
             /* UMULLS rdlo, rdhi, rm, rs */                                   \
@@ -569,17 +669,22 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0A:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], +rm */                                            \
-          arm_access_memory(store, up, post, u16, half_reg);                  \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* UMLAL rd, rm, rs */                                              \
-          arm_multiply_long(u64_add, yes, no);                                \
+          case 0:                                                             \
+            /* UMLAL rd, rm, rs */                                            \
+            arm_multiply_long(u64_add, yes, no);                              \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], +rm */                                          \
+            arm_access_memory(store, up, post, u16, half_reg);                \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -590,9 +695,9 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0B:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
           case 0:                                                             \
             /* UMLALS rdlo, rdhi, rm, rs */                                   \
@@ -623,17 +728,22 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0C:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], +imm */                                           \
-          arm_access_memory(store, up, post, u16, half_imm);                  \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* SMULL rd, rm, rs */                                              \
-          arm_multiply_long(s64, no, no);                                     \
+          case 0:                                                             \
+            /* SMULL rd, rm, rs */                                            \
+            arm_multiply_long(s64, no, no);                                   \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], +imm */                                         \
+            arm_access_memory(store, up, post, u16, half_imm);                \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -644,9 +754,9 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0D:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
           case 0:                                                             \
             /* SMULLS rdlo, rdhi, rm, rs */                                   \
@@ -677,17 +787,22 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0E:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
-          /* STRH rd, [rn], +imm */                                           \
-          arm_access_memory(store, up, post, u16, half_imm);                  \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          /* SMLAL rd, rm, rs */                                              \
-          arm_multiply_long(s64_add, yes, no);                                \
+          case 0:                                                             \
+            /* SMLAL rd, rm, rs */                                            \
+            arm_multiply_long(s64_add, yes, no);                              \
+            break;                                                            \
+                                                                              \
+          case 1:                                                             \
+            /* STRH rd, [rn], +imm */                                         \
+            arm_access_memory(store, up, post, u16, half_imm);                \
+            break;                                                            \
+                                                                              \
+          default:                                                            \
+            goto undefined;                                                   \
         }                                                                     \
       }                                                                       \
       else                                                                    \
@@ -698,9 +813,9 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x0F:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
           case 0:                                                             \
             /* SMLALS rdlo, rdhi, rm, rs */                                   \
@@ -731,31 +846,36 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x10:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      switch (opcode & 0xF0)                                                  \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
-        {                                                                     \
-          /* STRH rd, [rn - rm] */                                            \
-          arm_access_memory(store, down, pre, u16, half_reg);                 \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
+        case 0x00:                                                            \
+          /* MRS rd, cpsr */                                                  \
+          arm_psr(reg, read, cpsr);                                           \
+          break;                                                              \
+                                                                              \
+        case 0x90:                                                            \
           /* SWP rd, rm, [rn] */                                              \
           arm_swap(u32);                                                      \
-        }                                                                     \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        /* MRS rd, cpsr */                                                    \
-        arm_psr(reg, read, cpsr);                                             \
+          break;                                                              \
+                                                                              \
+        case 0xB0:                                                            \
+          /* STRH rd, [rn - rm] */                                            \
+          arm_access_memory(store, down, pre, u16, half_reg);                 \
+          break;                                                              \
+                                                                              \
+        default:                                                              \
+          goto undefined;                                                     \
       }                                                                       \
       break;                                                                  \
                                                                               \
     case 0x11:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn - rm] */                                          \
             arm_access_memory(load, down, pre, u16, half_reg);                \
@@ -780,31 +900,36 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x12:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      switch (opcode & 0xF0)                                                  \
       {                                                                       \
-        /* STRH rd, [rn - rm]! */                                             \
-        arm_access_memory(store, down, pre_wb, u16, half_reg);                \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        if(opcode & 0x10)                                                     \
-        {                                                                     \
-          /* BX rn */                                                         \
-          arm_bx();                                                           \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
+        case 0x00:                                                            \
           /* MSR cpsr, rm */                                                  \
           arm_psr(reg, store, cpsr);                                          \
-        }                                                                     \
+          break;                                                              \
+                                                                              \
+        case 0x10:                                                            \
+          /* BX rn */                                                         \
+          arm_bx();                                                           \
+          break;                                                              \
+                                                                              \
+        case 0xB0:                                                            \
+          /* STRH rd, [rn - rm]! */                                           \
+          arm_access_memory(store, down, pre_wb, u16, half_reg);              \
+          break;                                                              \
+                                                                              \
+        default:                                                              \
+          goto undefined;                                                     \
       }                                                                       \
       break;                                                                  \
                                                                               \
     case 0x13:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn - rm]! */                                         \
             arm_access_memory(load, down, pre_wb, u16, half_reg);             \
@@ -829,31 +954,36 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x14:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      switch (opcode & 0xF0)                                                  \
       {                                                                       \
-        if(opcode & 0x20)                                                     \
-        {                                                                     \
-          /* STRH rd, [rn - imm] */                                           \
-          arm_access_memory(store, down, pre, u16, half_imm);                 \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
+        case 0x00:                                                            \
+          /* MRS rd, spsr */                                                  \
+          arm_psr(reg, read, spsr);                                           \
+          break;                                                              \
+                                                                              \
+        case 0x90:                                                            \
           /* SWPB rd, rm, [rn] */                                             \
           arm_swap(u8);                                                       \
-        }                                                                     \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        /* MRS rd, spsr */                                                    \
-        arm_psr(reg, read, spsr);                                             \
+          break;                                                              \
+                                                                              \
+        case 0xB0:                                                            \
+          /* STRH rd, [rn - imm] */                                           \
+          arm_access_memory(store, down, pre, u16, half_imm);                 \
+          break;                                                              \
+                                                                              \
+        default:                                                              \
+          goto undefined;                                                     \
       }                                                                       \
       break;                                                                  \
                                                                               \
     case 0x15:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn - imm] */                                         \
             arm_access_memory(load, down, pre, u16, half_imm);                \
@@ -878,23 +1008,31 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x16:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      switch (opcode & 0xF0)                                                  \
       {                                                                       \
-        /* STRH rd, [rn - imm]! */                                            \
-        arm_access_memory(store, down, pre_wb, u16, half_imm);                \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        /* MSR spsr, rm */                                                    \
-        arm_psr(reg, store, spsr);                                            \
+        case 0x00:                                                            \
+          /* MSR spsr, rm */                                                  \
+          arm_psr(reg, store, spsr);                                          \
+          break;                                                              \
+                                                                              \
+        case 0xB0:                                                            \
+          /* STRH rd, [rn - imm]! */                                          \
+          arm_access_memory(store, down, pre_wb, u16, half_imm);              \
+          break;                                                              \
+                                                                              \
+        default:                                                              \
+          goto undefined;                                                     \
       }                                                                       \
       break;                                                                  \
                                                                               \
     case 0x17:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn - imm]! */                                        \
             arm_access_memory(load, down, pre_wb, u16, half_imm);             \
@@ -919,10 +1057,15 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x18:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn + rm] */                                              \
-        arm_access_memory(store, up, pre, u16, half_reg);                     \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn + rm] */                                            \
+          arm_access_memory(store, up, pre, u16, half_reg);                   \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
@@ -932,10 +1075,13 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x19:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn + rm] */                                          \
             arm_access_memory(load, up, pre, u16, half_reg);                  \
@@ -960,23 +1106,32 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x1A:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn + rm]! */                                             \
-        arm_access_memory(store, up, pre_wb, u16, half_reg);                  \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn + rm]! */                                           \
+          arm_access_memory(store, up, pre_wb, u16, half_reg);                \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
         /* MOV rd, reg_op */                                                  \
         arm_data_proc_unary(mov, reg, no_flags);                              \
+        check_cycle_counter(pc + 4);                                          \
       }                                                                       \
       break;                                                                  \
                                                                               \
     case 0x1B:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn + rm]! */                                         \
             arm_access_memory(load, up, pre_wb, u16, half_reg);               \
@@ -1001,10 +1156,15 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x1C:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn + imm] */                                             \
-        arm_access_memory(store, up, pre, u16, half_imm);                     \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn + imm] */                                           \
+          arm_access_memory(store, up, pre, u16, half_imm);                   \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
@@ -1014,10 +1174,13 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x1D:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn + imm] */                                         \
             arm_access_memory(load, up, pre, u16, half_imm);                  \
@@ -1042,10 +1205,15 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x1E:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        /* STRH rd, [rn + imm]! */                                            \
-        arm_access_memory(store, up, pre_wb, u16, half_imm);                  \
+        if (((opcode >> 5) & 0x03) == 0x01)                                   \
+        {                                                                     \
+          /* STRH rd, [rn + imm]! */                                          \
+          arm_access_memory(store, up, pre_wb, u16, half_imm);                \
+          break;                                                              \
+        }                                                                     \
+        goto undefined;                                                       \
       }                                                                       \
       else                                                                    \
       {                                                                       \
@@ -1055,10 +1223,13 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0x1F:                                                                \
-      if((opcode & 0x90) == 0x90)                                             \
+      if ((opcode & 0x90) == 0x90)                                            \
       {                                                                       \
-        switch((opcode >> 5) & 0x03)                                          \
+        switch ((opcode >> 5) & 0x03)                                         \
         {                                                                     \
+          case 0:                                                             \
+            goto undefined;                                                   \
+                                                                              \
           case 1:                                                             \
             /* LDRH rd, [rn + imm]! */                                        \
             arm_access_memory(load, up, pre_wb, u16, half_imm);               \
@@ -1162,9 +1333,9 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       arm_data_proc(rscs, imm, flags);                                        \
       break;                                                                  \
                                                                               \
-    case 0x30 ... 0x31:                                                       \
+    case 0x31:                                                                \
       /* TST rn, imm */                                                       \
-      arm_data_proc_test(tst, imm);                                           \
+      arm_data_proc_test(tst, imm_flags);                                     \
       break;                                                                  \
                                                                               \
     case 0x32:                                                                \
@@ -1174,10 +1345,10 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
                                                                               \
     case 0x33:                                                                \
       /* TEQ rn, imm */                                                       \
-      arm_data_proc_test(teq, imm);                                           \
+      arm_data_proc_test(teq, imm_flags);                                     \
       break;                                                                  \
                                                                               \
-    case 0x34 ... 0x35:                                                       \
+    case 0x35:                                                                \
       /* CMP rn, imm */                                                       \
       arm_data_proc_test(cmp, imm);                                           \
       break;                                                                  \
@@ -1665,39 +1836,38 @@ static inline void StatsAddWritableRecompilation(u32 Opcodes) {}
       break;                                                                  \
                                                                               \
     case 0xA0 ... 0xAF:                                                       \
-    {                                                                         \
       /* B offset */                                                          \
       arm_b();                                                                \
       break;                                                                  \
-    }                                                                         \
                                                                               \
     case 0xB0 ... 0xBF:                                                       \
-    {                                                                         \
       /* BL offset */                                                         \
       arm_bl();                                                               \
       break;                                                                  \
-    }                                                                         \
                                                                               \
     case 0xC0 ... 0xEF:                                                       \
       /* coprocessor instructions, reserved on GBA */                         \
       break;                                                                  \
                                                                               \
     case 0xF0 ... 0xFF:                                                       \
-    {                                                                         \
       /* SWI comment */                                                       \
       arm_swi();                                                              \
       break;                                                                  \
-    }                                                                         \
+                                                                              \
+    undefined:                                                                \
+    default:                                                                  \
+      break;                                                                  \
   }                                                                           \
                                                                               \
-  if(has_condition_header)                                                    \
+  if (has_condition_header != 0)                                              \
   {                                                                           \
+    generate_cycle_update();                                                  \
     generate_branch_patch_conditional(backpatch_address, translation_ptr);    \
   }                                                                           \
                                                                               \
   pc += 4                                                                     \
 
-static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
+static void arm_flag_status(BlockDataArmType* block_data, u32 opcode)
 {
 }
 
@@ -1707,6 +1877,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
   opcode = opcodes.thumb[block_data_position];                                \
                                                                               \
   StatsAddThumbOpcode();                                                      \
+  thumb_base_cycles();                                                        \
                                                                               \
   switch((opcode >> 8) & 0xFF)                                                \
   {                                                                           \
@@ -1746,27 +1917,23 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
       break;                                                                  \
                                                                               \
     case 0x20 ... 0x27:                                                       \
-      /* MOV r0..r7, imm */                                                   \
-      thumb_data_proc_unary(imm, movs, imm, (((opcode >> 8) & 0xFF) - 0x20),  \
-       imm);                                                                  \
+      /* MOV rd, imm */                                                       \
+      thumb_data_proc_unary(imm, movs, imm, rd, imm);                         \
       break;                                                                  \
                                                                               \
     case 0x28 ... 0x2F:                                                       \
-      /* CMP r0..r7, imm */                                                   \
-      thumb_data_proc_test(imm, cmp, imm, (((opcode >> 8) & 0xFF) - 0x28),    \
-       imm);                                                                  \
+      /* CMP rd, imm */                                                       \
+      thumb_data_proc_test(imm, cmp, imm, rd, imm);                           \
       break;                                                                  \
                                                                               \
     case 0x30 ... 0x37:                                                       \
-      /* ADD r0..r7, imm */                                                   \
-      thumb_data_proc(imm, adds, imm, (((opcode >> 8) & 0xFF) - 0x30),        \
-        (((opcode >> 8) & 0xFF) - 0x30), imm);                                \
+      /* ADD rd, imm */                                                       \
+      thumb_data_proc(imm, adds, imm, rd, rd, imm);                           \
       break;                                                                  \
                                                                               \
     case 0x38 ... 0x3F:                                                       \
-      /* SUB r0..r7, imm */                                                   \
-      thumb_data_proc(imm, subs, imm, (((opcode >> 8) & 0xFF) - 0x38),        \
-        (((opcode >> 8) & 0xFF) - 0x38), imm);                                \
+      /* SUB rd, imm */                                                       \
+      thumb_data_proc(imm, subs, imm, rd, rd, imm);                           \
       break;                                                                  \
                                                                               \
     case 0x40:                                                                \
@@ -1854,8 +2021,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
                                                                               \
         case 0x01:                                                            \
           /* MUL rd, rs */                                                    \
-          /*thumb_data_proc(alu_op, muls, reg, rd, rd, rs);*/                     \
-          thumb_data_proc_muls(alu_op, reg, rd, rd, rs);                      \
+          thumb_data_proc_muls(rd, rd, rs);                                   \
           break;                                                              \
                                                                               \
         case 0x02:                                                            \
@@ -1883,6 +2049,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
     case 0x46:                                                                \
       /* MOV rd, rs */                                                        \
       thumb_data_proc_mov_hi();                                               \
+      check_cycle_counter(pc + 2);                                            \
       break;                                                                  \
                                                                               \
     case 0x47:                                                                \
@@ -1891,9 +2058,8 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
       break;                                                                  \
                                                                               \
     case 0x48 ... 0x4F:                                                       \
-      /* LDR r0..r7, [pc + imm] */                                            \
-      thumb_access_memory(load, imm, (((opcode >> 8) & 0xFF) - 0x48), 0, 0,   \
-       pc_relative, ((pc & ~2) + (imm << 2) + 4), u32);                       \
+      /* LDR rd, [pc + imm] */                                                \
+      thumb_access_memory(load, imm, rd, 0, 0, pc_relative, ((pc & ~2) + (imm << 2) + 4), u32); \
       break;                                                                  \
                                                                               \
     case 0x50 ... 0x51:                                                       \
@@ -1938,8 +2104,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
                                                                               \
     case 0x60 ... 0x67:                                                       \
       /* STR rd, [rb + imm] */                                                \
-      thumb_access_memory(store, mem_imm, rd, rb, 0, reg_imm, (imm << 2),     \
-       u32);                                                                  \
+      thumb_access_memory(store, mem_imm, rd, rb, 0, reg_imm, (imm << 2), u32); \
       break;                                                                  \
                                                                               \
     case 0x68 ... 0x6F:                                                       \
@@ -1959,8 +2124,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
                                                                               \
     case 0x80 ... 0x87:                                                       \
       /* STRH rd, [rb + imm] */                                               \
-      thumb_access_memory(store, mem_imm, rd, rb, 0, reg_imm,                 \
-       (imm << 1), u16);                                                      \
+      thumb_access_memory(store, mem_imm, rd, rb, 0, reg_imm, (imm << 1), u16); \
       break;                                                                  \
                                                                               \
     case 0x88 ... 0x8F:                                                       \
@@ -1969,29 +2133,27 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
       break;                                                                  \
                                                                               \
     case 0x90 ... 0x97:                                                       \
-      /* STR r0..r7, [sp + imm] */                                            \
-      thumb_access_memory(store, imm, (((opcode >> 8) & 0xFF) - 0x90), 13, 0, \
-       reg_imm_sp, imm, u32);                                                 \
+      /* STR rd, [sp + imm] */                                                \
+      thumb_access_memory(store, imm, rd, 13, 0, reg_imm_sp, imm, u32);       \
       break;                                                                  \
                                                                               \
     case 0x98 ... 0x9F:                                                       \
-      /* LDR r0..r7, [sp + imm] */                                            \
-      thumb_access_memory(load, imm, (((opcode >> 8) & 0xFF) - 0x98), 13, 0,  \
-       reg_imm_sp, imm, u32);                                                 \
+      /* LDR rd, [sp + imm] */                                                \
+      thumb_access_memory(load, imm, rd, 13, 0, reg_imm_sp, imm, u32);        \
       break;                                                                  \
                                                                               \
     case 0xA0 ... 0xA7:                                                       \
-      /* ADD r0..r7, pc, +imm */                                              \
-      thumb_load_pc((((opcode >> 8) & 0xFF) - 0xA0));                         \
+      /* ADD rd, pc, +imm */                                                  \
+      thumb_load_pc(rd);                                                      \
       break;                                                                  \
                                                                               \
     case 0xA8 ... 0xAF:                                                       \
-      /* ADD r0..r7, sp, +imm */                                              \
-      thumb_load_sp((((opcode >> 8) & 0xFF) - 0xA8));                         \
+      /* ADD rd, sp, +imm */                                                  \
+      thumb_load_sp(rd);                                                      \
       break;                                                                  \
                                                                               \
     case 0xB0:                                                                \
-      if((opcode >> 7) & 0x01)                                                \
+      if (((opcode >> 7) & 0x01) != 0)                                        \
       {                                                                       \
         /* ADD sp, -imm */                                                    \
         thumb_adjust_sp(-(imm << 2));                                         \
@@ -2005,32 +2167,32 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
                                                                               \
     case 0xB4:                                                                \
       /* PUSH rlist */                                                        \
-      thumb_block_memory(store, down, no, 13);                                \
+      thumb_block_memory_sp(store, down_b);                                   \
       break;                                                                  \
                                                                               \
     case 0xB5:                                                                \
       /* PUSH rlist, lr */                                                    \
-      thumb_block_memory(store, push_lr, push_lr, 13);                        \
+      thumb_block_memory_sp(store, push_lr);                                  \
       break;                                                                  \
                                                                               \
     case 0xBC:                                                                \
       /* POP rlist */                                                         \
-      thumb_block_memory(load, no, up, 13);                                   \
+      thumb_block_memory_sp(load, up_a);                                      \
       break;                                                                  \
                                                                               \
     case 0xBD:                                                                \
       /* POP rlist, pc */                                                     \
-      thumb_block_memory(load, no, pop_pc, 13);                               \
+      thumb_block_memory_sp(load, pop_pc);                                    \
       break;                                                                  \
                                                                               \
     case 0xC0 ... 0xC7:                                                       \
-      /* STMIA r0..r7!, rlist */                                              \
-      thumb_block_memory(store, no, up, (((opcode >> 8) & 0xFF) - 0xC0));     \
+      /* STMIA rb!, rlist */                                                  \
+      thumb_block_memory(store, up_a);                                        \
       break;                                                                  \
                                                                               \
     case 0xC8 ... 0xCF:                                                       \
-      /* LDMIA r0..r7!, rlist */                                              \
-      thumb_block_memory(load, no, up, (((opcode >> 8) & 0xFF) - 0xC8));      \
+      /* LDMIA rb!, rlist */                                                  \
+      thumb_block_memory(load, up_a);                                         \
       break;                                                                  \
                                                                               \
     case 0xD0:                                                                \
@@ -2104,33 +2266,27 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
       break;                                                                  \
                                                                               \
     case 0xDF:                                                                \
-    {                                                                         \
       /* SWI comment */                                                       \
       thumb_swi();                                                            \
       break;                                                                  \
-    }                                                                         \
                                                                               \
     case 0xE0 ... 0xE7:                                                       \
-    {                                                                         \
       /* B label */                                                           \
       thumb_b();                                                              \
       break;                                                                  \
-    }                                                                         \
                                                                               \
     case 0xF0 ... 0xF7:                                                       \
-    {                                                                         \
       /* (low word) BL label */                                               \
       /* This should possibly generate code if not in conjunction with a BLH  \
          next, but I don't think anyone will do that. */                      \
+      thumb_bll();                                                            \
       break;                                                                  \
-    }                                                                         \
                                                                               \
     case 0xF8 ... 0xFF:                                                       \
-    {                                                                         \
       /* (high word) BL label */                                              \
       /* This might not be preceeding a BL low word (Golden Sun 2), if so     \
          it must be handled like an indirect branch. */                       \
-      if((last_opcode >= 0xF000) && (last_opcode < 0xF800))                   \
+      if ((last_opcode >= 0xF000) && (last_opcode < 0xF800))                  \
       {                                                                       \
         thumb_bl();                                                           \
       }                                                                       \
@@ -2139,7 +2295,9 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
         thumb_blh();                                                          \
       }                                                                       \
       break;                                                                  \
-    }                                                                         \
+                                                                              \
+    default:                                                                  \
+      break;                                                                  \
   }                                                                           \
                                                                               \
   pc += 2                                                                     \
@@ -2165,7 +2323,7 @@ static void arm_flag_status(block_data_arm_type* block_data, u32 opcode)
 #define thumb_flag_requires_all()                                             \
   flag_status |= 0xF00                                                        \
 
-static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
+static void thumb_flag_status(BlockDataThumbType* block_data, u16 opcode)
 {
   u16 flag_status = 0;
   switch((opcode >> 8) & 0xFF)
@@ -2201,7 +2359,7 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
       break;
 
     case 0x40:
-      switch((opcode >> 6) & 0x03)
+      switch ((opcode >> 6) & 0x03)
       {
         case 0x00:
           /* AND rd, rs */
@@ -2220,7 +2378,7 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
       break;
 
     case 0x41:
-      switch((opcode >> 6) & 0x03)
+      switch ((opcode >> 6) & 0x03)
       {
         case 0x00:
           /* ASR rd, rs */
@@ -2239,9 +2397,8 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
       }
       break;
 
-    /* TST, NEG, CMP, CMN */
     case 0x42:
-      if((opcode >> 6) & 0x03)
+      if (((opcode >> 6) & 0x03) != 0)
       {
         /* NEG, CMP, CMN */
         thumb_flag_modifies_all();
@@ -2253,16 +2410,27 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
       }
       break;
 
+    /* add might change PC (fall through if so) */
+    case 0x44:
+      if ((opcode & 0xFF87) != 0x4487)
+        break;
+
+      thumb_flag_requires_all();
+      break;
+
     /* mov might change PC (fall through if so) */
     case 0x46:
       if((opcode & 0xFF87) != 0x4687)
         break;
 
+      thumb_flag_requires_all();
+      break;
+
     /* branches (can change PC) */
     case 0x47:
     case 0xBD:
     case 0xD0 ... 0xE7:
-    case 0xF0 ... 0xFF:
+    case 0xF8 ... 0xFF:
       thumb_flag_requires_all();
       break;
   }
@@ -2361,9 +2529,9 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
                                                                               \
     /* If the translation failed then pass that failure on if we're in        \
        a recursive level, or try again if we've hit the bottom. */            \
-    if(translation_result == NULL)                                            \
+    if (translation_result == NULL)                                           \
     {                                                                         \
-      if(translation_recursion_level)                                         \
+      if (translation_recursion_level != 0)                                   \
         return NULL;                                                          \
                                                                               \
       goto redo;                                                              \
@@ -2390,8 +2558,7 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
  * we have to do it differently for the BIOS native code area. This can occur
  * in BIOS functions that loop.
  */
-#define block_lookup_translate_tagged_readonly(instruction_type, mem_type,    \
-  metadata_area)                                                              \
+#define block_lookup_translate_tagged_readonly(instruction_type, mem_type, metadata_area) \
   block_tag = get_tag_##instruction_type();                                   \
   if((block_tag < MIN_TAG) || (block_tag > metadata_area##_max_tag))          \
   {                                                                           \
@@ -2401,8 +2568,7 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
     redo:                                                                     \
     if (metadata_area##_block_tag_top > metadata_area##_max_tag)              \
     {                                                                         \
-      clear_metadata_area(metadata_area##_metadata_area,                      \
-        CLEAR_REASON_LAST_TAG);                                               \
+      clear_metadata_area(metadata_area##_metadata_area, CLEAR_REASON_LAST_TAG); \
     }                                                                         \
                                                                               \
     translation_recursion_level++;                                            \
@@ -2415,9 +2581,9 @@ static void thumb_flag_status(block_data_thumb_type* block_data, u16 opcode)
                                                                               \
     /* If the translation failed then pass that failure on if we're in        \
        a recursive level, or try again if we've hit the bottom. */            \
-    if(translation_result == NULL)                                            \
+    if (translation_result == NULL)                                           \
     {                                                                         \
-      if(translation_recursion_level)                                         \
+      if (translation_recursion_level != 0)                                   \
         return NULL;                                                          \
                                                                               \
       goto redo;                                                              \
@@ -2471,44 +2637,40 @@ static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translati
                                                                               \
   switch(pc >> 24)                                                            \
   {                                                                           \
-    case 0x0:                                                                 \
-      bios_region_read_allow();                                               \
+    case 0x00:                                                                \
       location = bios.metadata + (pc & 0x3FFC);                               \
       block_lookup_translate_tagged_readonly(type, readonly, bios);           \
-      if(translation_recursion_level == 0)                                    \
-        bios_region_read_allow();                                             \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_READONLY);               \
       break;                                                                  \
                                                                               \
-    case 0x2:                                                                 \
+    case 0x02:                                                                \
       location = ewram_metadata + (pc & 0x3FFFC);                             \
       block_lookup_translate(type, writable, ewram);                          \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
-    case 0x3:                                                                 \
+    case 0x03:                                                                \
       location = iwram_metadata + (pc & 0x7FFC);                              \
       block_lookup_translate(type, writable, iwram);                          \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
-    case 0x6:                                                                 \
-      if (pc & 0x10000)                                                       \
+    case 0x06:                                                                \
+      if ((pc & 0x10000) != 0)                                                \
         location = vram_metadata + (pc & 0x17FFC);                            \
       else                                                                    \
-        location = vram_metadata + (pc & 0xFFFC);                             \
+        location = vram_metadata + (pc & 0x0FFFC);                            \
       block_lookup_translate(type, writable, vram);                           \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
-    case 0x8 ... 0xD:                                                         \
+    case 0x08 ... 0x0D:                                                       \
     {                                                                         \
-      u32 hash_target = ((pc * 2654435761U) >> 16) &                          \
-       (ROM_BRANCH_HASH_SIZE - 1);                                            \
+      u32 hash_target = ((pc * 2654435761U) >> 16) & (ROM_BRANCH_HASH_SIZE - 1); \
       u32 *block_ptr = rom_branch_hash[hash_target];                          \
       u32 **block_ptr_address = rom_branch_hash + hash_target;                \
                                                                               \
-      while(block_ptr)                                                        \
+      while (block_ptr != NULL)                                               \
       {                                                                       \
         if(block_ptr[0] == pc)                                                \
         {                                                                     \
@@ -2540,7 +2702,7 @@ static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translati
          a recursive level, or try again if we've hit the bottom. */          \
         if(translation_result == NULL)                                        \
         {                                                                     \
-          if(translation_recursion_level)                                     \
+          if(translation_recursion_level != 0)                                \
             return NULL;                                                      \
                                                                               \
           goto redo;                                                          \
@@ -2566,7 +2728,7 @@ static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translati
            _*type* will expect the return value to be a native address to     \
            jump to. So we just let the ARMBadJump procedure run endlessly. */ \
       }                                                                       \
-      block_address = (u8 *)(NULL);                                           \
+      block_address = (u8 *)NULL;                                             \
       break;                                                                  \
   }                                                                           \
                                                                               \
@@ -2593,7 +2755,7 @@ block_lookup_address_body(thumb);
 
 u8 *block_lookup_address_dual(u32 pc)
 {
-  if(pc & 0x01)
+  if ((pc & 0x01) != 0)
   {
     reg[REG_CPSR] |= 0x20;
     return block_lookup_address_thumb(pc & ~0x01);
@@ -2615,33 +2777,32 @@ u8 *block_lookup_address_dual(u32 pc)
 // checked against). Because MSR and BX overlap both are checked for.
 
 #define arm_exit_point                                                        \
- (((opcode < 0x8000000) && ((opcode & 0x000F000) == 0x000F000) &&             \
-  ((opcode & 0xDB0F000) != 0x120F000)) ||                                     \
-  ((opcode & 0x12FFF10) == 0x12FFF10) ||                                      \
-  ((opcode & 0x8108000) == 0x8108000) ||                                      \
-  ((opcode >= 0xA000000) && (opcode < 0xF000000)) ||                          \
-  ((opcode >= 0xF000000) && (!swi_hle_handle[((opcode >> 16) & 0xFF)][0])))       \
+ ((((opcode & 0x0800F000) == 0x0000F000) && ((opcode & 0x0DB0F000) != 0x0120F000)) || /* Rd == R15 && !MSR */ \
+  ((opcode & 0x0FFFFFF0) == 0x012FFF10) || /* BX */                           \
+  ((opcode & 0x0e108000) == 0x08108000) || /* LDM R15 in list */              \
+  ((opcode >= 0x0A000000) && (opcode < 0x0F000000)) || /* B, BL, CP */        \
+  ((opcode >= 0x0F000000) && (((opcode >> 16) & 0xFF) < 0xF9))) /* SWI */     \
 
 #define arm_opcode_branch                                                     \
-  ((opcode & 0xE000000) == 0xA000000)                                         \
+  ((opcode & 0x0E000000) == 0x0A000000)                                       \
 
 #define arm_opcode_swi                                                        \
-  ((opcode & 0xF000000) == 0xF000000)                                         \
+  (((opcode & 0x0F000000) == 0x0F000000) && (((opcode >> 16) & 0xFF) < 0xF9)) \
 
 #define arm_opcode_unconditional_branch                                       \
   (condition == 0x0E)                                                         \
 
 #define arm_load_opcode()                                                     \
-  opcode = ADDRESS32(pc_address_block, (block_end_pc & 0x7FFF));              \
+  opcode = ADDRESS32(pc_address_block, (block_end_pc & 0x7FFC));              \
   opcodes.arm[block_data_position] = opcode;                                  \
   condition = opcode >> 28;                                                   \
                                                                               \
-  opcode &= 0xFFFFFFF;                                                        \
+  opcode &= 0x0FFFFFFF;                                                       \
                                                                               \
   block_end_pc += 4                                                           \
 
 #define arm_branch_target()                                                   \
-  branch_target = (block_end_pc + 4 + ((s32)(opcode << 8) >> 6))              \
+  branch_target = block_end_pc + 4 + ((s32)(opcode << 8) >> 6)                \
 
 // Contiguous conditional block flags modification - it will set 0x20 in the
 // condition's bits if this instruction modifies flags. Taken from the CPU
@@ -2649,7 +2810,7 @@ u8 *block_lookup_address_dual(u32 pc)
 
 #define arm_set_condition(_condition)                                         \
   block_data.arm[block_data_position].condition = _condition;                 \
-  switch((opcode >> 20) & 0xFF)                                               \
+  switch ((opcode >> 20) & 0xFF)                                              \
   {                                                                           \
     case 0x01:                                                                \
     case 0x03:                                                                \
@@ -2657,7 +2818,7 @@ u8 *block_lookup_address_dual(u32 pc)
     case 0x0B:                                                                \
     case 0x0D:                                                                \
     case 0x0F:                                                                \
-      if((((opcode >> 5) & 0x03) == 0) || ((opcode & 0x90) != 0x90))          \
+      if ((((opcode >> 5) & 0x03) == 0) || ((opcode & 0x90) != 0x90))         \
         block_data.arm[block_data_position].condition |= 0x20;                \
       break;                                                                  \
                                                                               \
@@ -2665,17 +2826,18 @@ u8 *block_lookup_address_dual(u32 pc)
     case 0x07:                                                                \
     case 0x11:                                                                \
     case 0x13:                                                                \
-    case 0x15 ... 0x17:                                                       \
+    case 0x15:                                                                \
+    case 0x17:                                                                \
     case 0x19:                                                                \
     case 0x1B:                                                                \
     case 0x1D:                                                                \
     case 0x1F:                                                                \
-      if((opcode & 0x90) != 0x90)                                             \
+      if ((opcode & 0x90) != 0x90)                                            \
         block_data.arm[block_data_position].condition |= 0x20;                \
       break;                                                                  \
                                                                               \
     case 0x12:                                                                \
-      if(((opcode & 0x90) != 0x90) && !(opcode & 0x10))                       \
+      if ((opcode & 0xF0) == 0x00)                                            \
         block_data.arm[block_data_position].condition |= 0x20;                \
       break;                                                                  \
                                                                               \
@@ -2686,7 +2848,9 @@ u8 *block_lookup_address_dual(u32 pc)
     case 0x29:                                                                \
     case 0x2B:                                                                \
     case 0x2D:                                                                \
-    case 0x2F ... 0x37:                                                       \
+    case 0x2F:                                                                \
+    case 0x31: case 0x32: case 0x33:                                          \
+    case 0x35: case 0x37:                                                     \
     case 0x39:                                                                \
     case 0x3B:                                                                \
     case 0x3D:                                                                \
@@ -2702,15 +2866,9 @@ u8 *block_lookup_address_dual(u32 pc)
 #define arm_instruction_nibbles 8
 #define arm_instruction_type u32
 
-#ifdef OLD_COUNT
 #define arm_base_cycles()                                                     \
-  cycle_count += waitstate_cycles_sequential[pc >> 24][2]                     \
+  cycle_count++;                                                              \
 
-#else
-#define arm_base_cycles()                                                     \
-  cycle_count += cpu_waitstate_cycles_seq[1][pc >> 24]                        \
-
-#endif
 // For now this just sets a variable that says flags should always be
 // computed.
 
@@ -2722,14 +2880,14 @@ u8 *block_lookup_address_dual(u32 pc)
 // op only. Rather simpler to identify than the ARM set.
 
 #define thumb_exit_point                                                      \
-  (((opcode >= 0xD000) && (opcode < 0xDF00)) ||                               \
-   (((opcode & 0xFF00) == 0xDF00) &&                                          \
-    (!swi_hle_handle[opcode & 0xFF][0])) ||                           \
-   ((opcode >= 0xE000) && (opcode < 0xE800)) ||                               \
-   ((opcode & 0xFF00) == 0x4700) ||                                           \
-   ((opcode & 0xFF00) == 0xBD00) ||                                           \
-   ((opcode & 0xFF87) == 0x4687) ||                                           \
-   ((opcode >= 0xF800)))                                                      \
+  (((opcode >= 0xD000) && (opcode < 0xDF00)) || /* conditional branch */      \
+   (((opcode & 0xFF00) == 0xDF00) && ((opcode & 0xFF) < 0xF9)) || /* SWI */   \
+   ((opcode >= 0xE000) && (opcode < 0xE800)) || /* B label */                 \
+   ((opcode & 0xFF87) == 0x4487) || /* ADD rd, rs (rd == pc) */               \
+   ((opcode & 0xFF87) == 0x4687) || /* MOV rd, rs (rd == pc) */               \
+   ((opcode & 0xFF00) == 0x4700) || /* BX rs */                               \
+   ((opcode & 0xFF00) == 0xBD00) || /* POP rlist, pc */                       \
+   ((opcode >= 0xF800)))            /* BL label */                            \
 
 #define thumb_opcode_branch                                                   \
   (((opcode >= 0xD000) && (opcode < 0xDF00)) ||                               \
@@ -2737,14 +2895,14 @@ u8 *block_lookup_address_dual(u32 pc)
    (opcode >= 0xF800))                                                        \
 
 #define thumb_opcode_swi                                                      \
-  ((opcode & 0xFF00) == 0xDF00)                                               \
+  (((opcode & 0xFF00) == 0xDF00) && ((opcode & 0xFF) < 0xF9))                 \
 
 #define thumb_opcode_unconditional_branch                                     \
   ((opcode < 0xD000) || (opcode >= 0xDF00))                                   \
 
 #define thumb_load_opcode()                                                   \
   last_opcode = opcode;                                                       \
-  opcode = ADDRESS16(pc_address_block, (block_end_pc & 0x7FFF));              \
+  opcode = ADDRESS16(pc_address_block, (block_end_pc & 0x7FFe));              \
   opcodes.thumb[block_data_position] = opcode;                                \
                                                                               \
   block_end_pc += 2                                                           \
@@ -2786,15 +2944,8 @@ u8 *block_lookup_address_dual(u32 pc)
 #define thumb_instruction_nibbles 4
 #define thumb_instruction_type u16
 
-#ifdef OLD_COUNT
 #define thumb_base_cycles()                                                   \
-  cycle_count += waitstate_cycles_sequential[pc >> 24][1]                     \
-
-#else
-#define thumb_base_cycles()                                                   \
-  cycle_count += cpu_waitstate_cycles_seq[0][pc >> 24]                        \
-
-#endif
+  cycle_count++;                                                              \
 
 // Here's how this works: each instruction has three different sets of flag
 // attributes, each consisiting of a 4bit mask describing how that instruction
@@ -2832,8 +2983,7 @@ u8 *block_lookup_address_dual(u32 pc)
   while(block_data_position >= 0)                                             \
   {                                                                           \
     flag_status = block_data.thumb[block_data_position].flag_data;            \
-    block_data.thumb[block_data_position].flag_data =                         \
-     (flag_status & needed_mask);                                             \
+    block_data.thumb[block_data_position].flag_data = flag_status & needed_mask; \
     needed_mask &= ~((flag_status >> 4) & 0x0F);                              \
     needed_mask |= flag_status >> 8;                                          \
     block_data_position--;                                                    \
@@ -2844,17 +2994,17 @@ u8 *block_lookup_address_dual(u32 pc)
 #define MAX_EXITS      256
 
 typedef union {
-  block_data_arm_type arm[MAX_BLOCK_SIZE];
-  block_data_thumb_type thumb[MAX_BLOCK_SIZE];
-} block_data_type;
+  BlockDataArmType arm[MAX_BLOCK_SIZE];
+  BlockDataThumbType thumb[MAX_BLOCK_SIZE];
+} BlockDataType;
 
 typedef union {
   u32 arm[MAX_BLOCK_SIZE];
   u16 thumb[MAX_BLOCK_SIZE];
-} opcode_data_type;
+} OpcodeDataType;
 
-block_data_type block_data;
-opcode_data_type opcodes;
+BlockDataType block_data;
+OpcodeDataType opcodes;
 
 #define smc_write_arm_yes()                                                   \
   switch (block_end_pc >> 24)                                                 \
@@ -2866,10 +3016,10 @@ opcode_data_type opcodes;
       iwram_metadata[(block_end_pc & 0x7FFC) | 3] |= 0x2;                     \
       break;                                                                  \
     case 0x06: /* VRAM */                                                     \
-      if (block_end_pc & 0x10000)                                             \
+      if ((block_end_pc & 0x10000) != 0)                                      \
         vram_metadata[(block_end_pc & 0x17FFC) | 3] |= 0x2;                   \
       else                                                                    \
-        vram_metadata[(block_end_pc & 0xFFFC) | 3] |= 0x2;                    \
+        vram_metadata[(block_end_pc & 0x0FFFC) | 3] |= 0x2;                   \
       break;                                                                  \
   }                                                                           \
 
@@ -2883,10 +3033,10 @@ opcode_data_type opcodes;
       iwram_metadata[(block_end_pc & 0x7FFC) | 3] |= 0x1;                     \
       break;                                                                  \
     case 0x06: /* VRAM */                                                     \
-      if (block_end_pc & 0x10000)                                             \
+      if ((block_end_pc & 0x10000) != 0)                                      \
         vram_metadata[(block_end_pc & 0x17FFC) | 3] |= 0x1;                   \
       else                                                                    \
-        vram_metadata[(block_end_pc & 0xFFFC) | 3] |= 0x1;                    \
+        vram_metadata[(block_end_pc & 0x0FFFC) | 3] |= 0x1;                   \
       break;                                                                  \
   }                                                                           \
 
@@ -2906,10 +3056,10 @@ opcode_data_type opcodes;
         iwram_metadata[(previous_pc & 0x7FFC) | 3] |= 0x8;                    \
         break;                                                                \
       case 0x06: /* VRAM */                                                   \
-        if (previous_pc & 0x10000)                                            \
+        if ((previous_pc & 0x10000) != 0)                                     \
           vram_metadata[(previous_pc & 0x17FFC) | 3] |= 0x8;                  \
         else                                                                  \
-          vram_metadata[(previous_pc & 0xFFFC) | 3] |= 0x8;                   \
+          vram_metadata[(previous_pc & 0x0FFFC) | 3] |= 0x8;                  \
         break;                                                                \
     }                                                                         \
   }                                                                           \
@@ -2927,10 +3077,10 @@ opcode_data_type opcodes;
         iwram_metadata[(previous_pc & 0x7FFC) | 3] |= 0x4;                    \
         break;                                                                \
       case 0x06: /* VRAM */                                                   \
-        if (previous_pc & 0x10000)                                            \
+        if ((previous_pc & 0x10000) != 0)                                     \
           vram_metadata[(previous_pc & 0x17FFC) | 3] |= 0x4;                  \
         else                                                                  \
-          vram_metadata[(previous_pc & 0xFFFC) | 3] |= 0x4;                   \
+          vram_metadata[(previous_pc & 0x0FFFC) | 3] |= 0x4;                  \
         break;                                                                \
     }                                                                         \
   }                                                                           \
@@ -2939,11 +3089,72 @@ opcode_data_type opcodes;
 
 #define unconditional_branch_write_thumb_no()                                 \
 
+/*
+ * Inserts Value into a sorted Array of unique values (or doesn't), of
+ * size Size.
+ * If Value was already present, then the old size is returned, and no
+ * insertions are made. Otherwise, Value is inserted into Array at the
+ * proper position to maintain its total order, and Size + 1 is returned.
+ */
+static u32 InsertUniqueSorted(u32 *Array, u32 Value, s32 Size)
+{
+  // Gather the insertion index with a binary search.
+  s32 Min = 0, Max = Size - 1;
+  while (Min < Max) {
+    s32 Mid = Min + (Max - Min) / 2;
+    if (Array[Mid] < Value)
+      Min = Mid + 1;
+    else
+      Max = Mid;
+  }
+
+  // Insert at Min.
+  // Min == Size means we just insert at the end...
+  if (Min == Size) {
+    Array[Size] = Value;
+    return Size + 1;
+  }
+  // ... otherwise it's either already in the array...
+  else if (Array[Min] == Value) {
+    return Size;
+  }
+  // ... or we need to move things.
+  else {
+    memmove(&Array[Min + 1], &Array[Min], Size - Min);
+    Array[Min] = Value;
+    return Size + 1;
+  }
+}
+
+/*
+ * Searches for the given Value in the given sorted Array of size Size.
+ * If found, the index in the Array of the first element having the given
+ * Value is returned.
+ * Otherwise, -1 is returned.
+ */
+static s32 BinarySearch(u32 *Array, u32 Value, s32 Size)
+{
+  s32 Min = 0, Max = Size - 1;
+  while (Min < Max) {
+    s32 Mid = Min + (Max - Min) / 2;
+    if (Array[Mid] < Value)
+      Min = Mid + 1;
+    else
+      Max = Mid;
+  }
+
+  if (Min == Max && Array[Min] == Value)
+    return Min;
+  else
+    return -1;
+}
+
 #define scan_block(type, smc_write_op)                                        \
 {                                                                             \
   u8 continue_block = 1;                                                      \
-  u8 branch_target_bitmap[MAX_BLOCK_SIZE];                                    \
-  memset(branch_target_bitmap, 0, sizeof(branch_target_bitmap));              \
+  u32 branch_targets_sorted[MAX_EXITS];                                       \
+  u32 sorted_branch_count = 0;                                                \
+                                                                              \
   /* Find the end of the block */                                             \
 /*printf("str: %08x\n", block_start_pc);*/\
   do                                                                          \
@@ -2951,25 +3162,21 @@ opcode_data_type opcodes;
     check_pc_region(block_end_pc);                                            \
     smc_write_##type##_##smc_write_op();                                      \
     type##_load_opcode();                                                     \
-    type##_flag_status(&block_data.type[block_data_position],                 \
-     opcodes.type[block_data_position]);                                      \
+    type##_flag_status(&block_data.type[block_data_position], opcodes.type[block_data_position]); \
                                                                               \
-    if(type##_exit_point)                                                     \
+    if (type##_exit_point != 0)                                               \
     {                                                                         \
       /* Branch/branch with link */                                           \
-      if(type##_opcode_branch)                                                \
+      if (type##_opcode_branch != 0)                                          \
       {                                                                       \
         __label__ no_direct_branch;                                           \
         type##_branch_target();                                               \
         block_exits[block_exit_position].branch_target = branch_target;       \
-        if (branch_target >= block_start_pc &&                                \
-            branch_target <  block_start_pc +                                 \
-             MAX_BLOCK_SIZE * type##_instruction_width)                       \
+        if (translation_region == TRANSLATION_REGION_READONLY)                \
         {                                                                     \
-          branch_target_bitmap[(branch_target - block_start_pc) /             \
-           type##_instruction_width] = 1;                                     \
-          block_data.type[(branch_target - block_start_pc) /                  \
-           type##_instruction_width].update_cycles = 1;                       \
+          /* If we're in RAM, exit at the first unconditional branch, no      \
+           * questions asked */                                               \
+          sorted_branch_count = InsertUniqueSorted(branch_targets_sorted, branch_target, sorted_branch_count); \
         }                                                                     \
         block_exit_position++;                                                \
                                                                               \
@@ -2980,25 +3187,32 @@ opcode_data_type opcodes;
                                                                               \
       /* SWI branches to the BIOS, this will likely change when               \
          some HLE BIOS is implemented. */                                     \
-      if(type##_opcode_swi)                                                   \
+      if (type##_opcode_swi != 0)                                             \
       {                                                                       \
         block_exits[block_exit_position].branch_target = 0x00000008;          \
+        if (translation_region == TRANSLATION_REGION_READONLY)                \
+        {                                                                     \
+          /* If we're in RAM, exit at the first unconditional branch, no      \
+           * questions asked */                                               \
+          sorted_branch_count = InsertUniqueSorted(branch_targets_sorted, 0x00000008, sorted_branch_count); /* could already be in */ \
+        }                                                                     \
         block_exit_position++;                                                \
       }                                                                       \
                                                                               \
       type##_set_condition(condition | 0x10);                                 \
                                                                               \
       /* Only unconditional branches can end the block. */                    \
-      if(type##_opcode_unconditional_branch)                                  \
+      if(type##_opcode_unconditional_branch != 0)                             \
       {                                                                       \
         /* Check to see if any prior block exits branch after here,           \
-         * if so don't end the block.                                         \
+         * if so don't end the block. For efficiency, but to also keep the    \
+         * correct order of the scanned branches for code emission, this is   \
+         * using a separate sorted array with unique branch_targets.          \
          * If we're in RAM, exit at the first unconditional branch, no        \
          * questions asked. We can do that, since unconditional branches that \
          * go outside the current block are made indirect. */                 \
-        if (translation_region == TRANSLATION_REGION_WRITABLE                 \
-         || branch_target_bitmap[(block_end_pc - block_start_pc) /            \
-           type##_instruction_width] == 0)                                    \
+        if (translation_region == TRANSLATION_REGION_WRITABLE ||              \
+            BinarySearch(branch_targets_sorted, block_end_pc, sorted_branch_count) == -1) \
         {                                                                     \
           continue_block = 0;                                                 \
           unconditional_branch_write_##type##_##smc_write_op();               \
@@ -3015,12 +3229,12 @@ opcode_data_type opcodes;
     {                                                                         \
       type##_set_condition(condition);                                        \
     }                                                                         \
-    if (branch_target_bitmap[block_data_position] == 0)                       \
-      block_data.type[block_data_position].update_cycles = 0;                 \
+    block_data.type[block_data_position].update_cycles = 0;                   \
     block_data_position++;                                                    \
                                                                               \
-    if((block_data_position == MAX_BLOCK_SIZE) ||                             \
-     (block_end_pc == 0x3007FF0) || (block_end_pc == 0x203FFF0))              \
+    if ((block_data_position == MAX_BLOCK_SIZE) ||                            \
+        ((block_end_pc & 0xFF03FFFF) == 0x0203FFF0) ||                        \
+        ((block_end_pc & 0xFF007FFF) == 0x03007F00))                          \
     {                                                                         \
       if(block_data_position == MAX_BLOCK_SIZE)                               \
         ReGBA_MaxBlockSizeReached(block_start_pc, block_end_pc,               \
@@ -3028,7 +3242,7 @@ opcode_data_type opcodes;
       translation_gate_required = 1;                                          \
       continue_block = 0;                                                     \
     }                                                                         \
-  } while(continue_block);                                                    \
+  } while (continue_block != 0);                                              \
 /*printf("end: %08x\n", block_end_pc);*/\
 }                                                                             \
 
@@ -3098,14 +3312,14 @@ u8* translate_block_##type(u32 pc)                                            \
   u32 opcode = 0;                                                             \
   u32 last_opcode;                                                            \
   u32 condition;                                                              \
-  u32 pc_region = (pc >> 15);                                                 \
-  u32 new_pc_region;                                                          \
+  u32 new_pc_region = (pc >> 15);                                             \
+  u32 pc_region = new_pc_region;                                              \
   u8 *pc_address_block = memory_map_read[pc_region];                          \
   u32 block_start_pc = pc;                                                    \
   u32 block_end_pc = pc;                                                      \
-  u32 block_exit_position = 0;                                                \
+  s32 block_exit_position = 0;                                                \
   s32 block_data_position = 0;                                                \
-  u32 external_block_exit_position = 0;                                       \
+  s32 external_block_exit_position = 0;                                       \
   u32 branch_target;                                                          \
   u32 cycle_count = 0;                                                        \
   u8 *translation_target;                                                     \
@@ -3114,7 +3328,7 @@ u8* translate_block_##type(u32 pc)                                            \
   u8 *translation_cache_limit = NULL;                                         \
   s32 i;                                                                      \
   u32 flag_status;                                                            \
-  block_exit_type block_exits[MAX_EXITS];                                     \
+  BlockExitType ALIGN_DATA block_exits[MAX_EXITS];                            \
                                                                               \
   generate_block_extra_vars_##type();                                         \
   type##_fix_pc();                                                            \
@@ -3122,7 +3336,7 @@ u8* translate_block_##type(u32 pc)                                            \
                                                                               \
   trace_translation_request();                                                \
                                                                               \
-  if(pc_address_block == NULL)                                                \
+  if (pc_address_block == NULL)                                               \
     pc_address_block = load_gamepak_page(pc_region & 0x3FF);                  \
                                                                               \
   switch(pc >> 24)                                                            \
@@ -3173,10 +3387,9 @@ u8* translate_block_##type(u32 pc)                                            \
     u16 checksum = block_checksum_##type(block_data_position);                \
                                                                               \
     /* Where can we modify the address of the current header for linking? */  \
-    struct ReuseHeader** HeaderAddr =                                         \
-     &writable_checksum_hash[checksum & (WRITABLE_HASH_SIZE - 1)];            \
+    ReuseHeader **HeaderAddr = &writable_checksum_hash[checksum & (WRITABLE_HASH_SIZE - 1)]; \
     /* Where is the current header? */                                        \
-    struct ReuseHeader* Header = *HeaderAddr;                                 \
+    ReuseHeader *Header = *HeaderAddr;                                        \
     while (Header != NULL)                                                    \
     {                                                                         \
       if (Header->PC == block_start_pc                                        \
@@ -3184,14 +3397,14 @@ u8* translate_block_##type(u32 pc)                                            \
        && memcmp(opcodes.type, Header + 1, Header->GBACodeSize) == 0)         \
       {                                                                       \
         /* The code has been determined to be identical. Yay! */              \
-        StatsAddWritableReuse((block_end_pc - block_start_pc) /               \
-         type##_instruction_width);                                           \
+        StatsAddWritableReuse((block_end_pc - block_start_pc) / type##_instruction_width); \
         trace_reuse();                                                        \
                                                                               \
-        u8* NativeCode = (u8 *) (Header + 1) + Header->GBACodeSize;           \
-        if ((((unsigned int) NativeCode) & (CODE_ALIGN_SIZE - 1)) != 0)       \
-          NativeCode += CODE_ALIGN_SIZE - (((unsigned int) NativeCode) &      \
-           (CODE_ALIGN_SIZE - 1));                                            \
+        u8 *NativeCode = (u8 *)(Header + 1) + Header->GBACodeSize;            \
+        if ((((u32) NativeCode) & (CODE_ALIGN_SIZE - 1)) != 0)                \
+        {                                                                     \
+          NativeCode += CODE_ALIGN_SIZE - (((u32) NativeCode) & (CODE_ALIGN_SIZE - 1)); \
+        }                                                                     \
                                                                               \
         /* Adjust the Metadata Entries for the GBA Data Words that were       \
          * just reused, as if they had been recompiled. */                    \
@@ -3214,42 +3427,36 @@ u8* translate_block_##type(u32 pc)                                            \
     }                                                                         \
                                                                               \
     /* If we get here, we could not reuse code. */                            \
-    u32 Alignment = CODE_ALIGN_SIZE -                                         \
-       (((unsigned int) translation_ptr + sizeof(struct ReuseHeader)          \
-       + (block_end_pc - block_start_pc))                                     \
-       & (CODE_ALIGN_SIZE - 1));                                              \
+    u32 code_size = block_end_pc - block_start_pc;                            \
+    u32 Alignment = CODE_ALIGN_SIZE - (((u32) translation_ptr + sizeof(ReuseHeader) + code_size) & (CODE_ALIGN_SIZE - 1)); \
     if (Alignment == CODE_ALIGN_SIZE)  Alignment = 0;                         \
                                                                               \
-    if (translation_ptr + sizeof(struct ReuseHeader)                          \
-     + (block_end_pc - block_start_pc) + Alignment                            \
-     > translation_cache_limit)                                               \
+    if (translation_ptr + sizeof(ReuseHeader) + code_size + Alignment > translation_cache_limit) \
     {                                                                         \
       /* We ran out of space for what would come before the native code.      \
        * Get out. */                                                          \
       translation_flush_count++;                                              \
                                                                               \
-      flush_translation_cache(TRANSLATION_REGION_WRITABLE,                    \
-        FLUSH_REASON_FULL_CACHE);                                             \
+      flush_translation_cache(TRANSLATION_REGION_WRITABLE, FLUSH_REASON_FULL_CACHE); \
                                                                               \
       return NULL;                                                            \
     }                                                                         \
                                                                               \
-    StatsAddWritableRecompilation((block_end_pc - block_start_pc) /           \
-     type##_instruction_width);                                               \
+    StatsAddWritableRecompilation(code_size / type##_instruction_width);      \
     trace_recompilation(type);                                                \
                                                                               \
     /* Fill the reuse header and link it to the linked list at HeaderAddr. */ \
-    Header = (struct ReuseHeader*) translation_ptr;                           \
+    Header = (ReuseHeader *)translation_ptr;                                  \
     *HeaderAddr = Header;                                                     \
                                                                               \
     Header->PC = block_start_pc;                                              \
     Header->Next = NULL;                                                      \
-    Header->GBACodeSize = block_end_pc - block_start_pc;                      \
+    Header->GBACodeSize = code_size;                                          \
                                                                               \
-    translation_ptr += sizeof(struct ReuseHeader);                            \
-    memcpy(translation_ptr, opcodes.type, block_end_pc - block_start_pc);     \
+    translation_ptr += sizeof(ReuseHeader);                                   \
+    memcpy(translation_ptr, opcodes.type, code_size);                         \
                                                                               \
-    translation_ptr += (block_end_pc - block_start_pc) + Alignment;           \
+    translation_ptr += code_size+ Alignment;                                  \
   }                                                                           \
   else                                                                        \
   {                                                                           \
@@ -3257,6 +3464,16 @@ u8* translate_block_##type(u32 pc)                                            \
   }                                                                           \
                                                                               \
   generate_block_prologue();                                                  \
+                                                                              \
+  for (i = 0; i < block_exit_position; i++)                                   \
+  {                                                                           \
+    branch_target = block_exits[i].branch_target;                             \
+                                                                              \
+    if ((branch_target > block_start_pc) && (branch_target < block_end_pc))   \
+    {                                                                         \
+      block_data.type[(branch_target - block_start_pc) / type##_instruction_width].update_cycles = 1; \
+    }                                                                         \
+  }                                                                           \
                                                                               \
   /* Dead flag elimination is a sort of second pass. It works on the          \
    * instructions in reverse, skipping processing to calculate the status of  \
@@ -3270,7 +3487,6 @@ u8* translate_block_##type(u32 pc)                                            \
   while(pc != block_end_pc)                                                   \
   {                                                                           \
     block_data.type[block_data_position].block_offset = translation_ptr;      \
-    type##_base_cycles();                                                     \
                                                                               \
     translate_##type##_instruction();                                         \
     block_data_position++;                                                    \
@@ -3291,30 +3507,26 @@ u8* translate_block_##type(u32 pc)                                            \
                                                                               \
     /* If the next instruction is a block entry point update the              \
        cycle counter and update */                                            \
-    if(block_data.type[block_data_position].update_cycles)                    \
+    if (block_data.type[block_data_position].update_cycles != 0)              \
     {                                                                         \
       generate_cycle_update();                                                \
     }                                                                         \
   }                                                                           \
                                                                               \
-  if (translation_gate_required)                                              \
+  if (translation_gate_required != 0)                                         \
   {                                                                           \
     generate_translation_gate(type);                                          \
   }                                                                           \
                                                                               \
-  for(i = 0; i < block_exit_position; i++)                                    \
+  for (i = 0; i < block_exit_position; i++)                                   \
   {                                                                           \
     branch_target = block_exits[i].branch_target;                             \
                                                                               \
-    if((branch_target >= block_start_pc) && (branch_target < block_end_pc))   \
+    if ((branch_target >= block_start_pc) && (branch_target < block_end_pc))  \
     {                                                                         \
       /* Internal branch, patch to recorded address */                        \
-      translation_target =                                                    \
-       block_data.type[(branch_target - block_start_pc) /                     \
-        type##_instruction_width].block_offset;                               \
-                                                                              \
-      generate_branch_patch_unconditional(block_exits[i].branch_source,       \
-       translation_target);                                                   \
+      translation_target = block_data.type[(branch_target - block_start_pc) / type##_instruction_width].block_offset; \
+      generate_branch_patch_unconditional(block_exits[i].branch_source, translation_target); \
     }                                                                         \
     else                                                                      \
     {                                                                         \
@@ -3328,8 +3540,7 @@ u8* translate_block_##type(u32 pc)                                            \
       {                                                                       \
         if (i != external_block_exit_position)                                \
         {                                                                     \
-          memcpy(&block_exits[external_block_exit_position], &block_exits[i], \
-            sizeof(block_exit_type));                                         \
+          memcpy(&block_exits[external_block_exit_position], &block_exits[i], sizeof(BlockExitType)); \
         }                                                                     \
         external_block_exit_position++;                                       \
       }                                                                       \
@@ -3344,9 +3555,8 @@ u8* translate_block_##type(u32 pc)                                            \
       readonly_next_code = translation_ptr;                                   \
       break;                                                                  \
     case TRANSLATION_REGION_WRITABLE:                                         \
-      if (((unsigned int) translation_ptr & (sizeof(u32) - 1)) != 0)          \
-        translation_ptr += sizeof(u32) - ((unsigned int) translation_ptr      \
-         & (sizeof(u32) - 1)); /* Align the next block to 4 bytes */          \
+      if (((u32)translation_ptr & (sizeof(u32) - 1)) != 0)                    \
+        translation_ptr += sizeof(u32) - ((u32) translation_ptr & (sizeof(u32) - 1)); /* Align the next block to 4 bytes */ \
       writable_next_code = translation_ptr;                                   \
       break;                                                                  \
   }                                                                           \
@@ -3359,8 +3569,7 @@ u8* translate_block_##type(u32 pc)                                            \
     type##_link_block();                                                      \
     if(translation_target == NULL)                                            \
       return NULL;                                                            \
-    generate_branch_patch_unconditional(                                      \
-     block_exits[i].branch_source, translation_target);                       \
+    generate_branch_patch_unconditional(block_exits[i].branch_source, translation_target); \
   }                                                                           \
                                                                               \
   ReGBA_MakeCodeVisible(update_trampoline,                                    \
@@ -3411,42 +3620,58 @@ static u16 block_checksum_thumb(u32 opcode_count)
 
 static void update_metadata_area_start(u32 pc)
 {
-  switch(pc >> 24)
+  u32 offset = 0;
+
+  switch (pc >> 24)
   {
     case 0x02: /* EWRAM */
-      if((pc < ewram_code_min) || (ewram_code_min == 0xFFFFFFFF))
-        ewram_code_min = pc;
+      offset = pc & 0x3FFFC;
+      if (offset < ewram_code_min)
+        ewram_code_min = offset;
       break;
 
     case 0x03: /* IWRAM */
-      if((pc < iwram_code_min) || (iwram_code_min == 0xFFFFFFFF))
-        iwram_code_min = pc;
+      offset = pc & 0x7FFC;
+      if (offset < iwram_code_min)
+        iwram_code_min = offset;
       break;
 
     case 0x06: /* VRAM */
-      if((pc < vram_code_min) || (vram_code_min == 0xFFFFFFFF))
-        vram_code_min = pc;
+      if ((pc & 0x10000) != 0)
+        offset = pc & 0x17FFC;
+      else
+        offset = pc & 0x0FFFC;
+      if (offset < vram_code_min)
+        vram_code_min = offset;
       break;
   }
 }
 
 static void update_metadata_area_end(u32 pc)
 {
-  switch(pc >> 24)
+  u32 offset = 0;
+
+  switch (pc >> 24)
   {
     case 0x02: /* EWRAM */
-      if((pc > ewram_code_max) || (ewram_code_max == 0xFFFFFFFF))
-        ewram_code_max = pc;
+      offset = pc & 0x3FFFC;
+      if ((offset > ewram_code_max) || (ewram_code_max == 0xFFFFFFFF))
+        ewram_code_max = offset;
       break;
 
     case 0x03: /* IWRAM */
-      if((pc > iwram_code_max) || (iwram_code_max == 0xFFFFFFFF))
-        iwram_code_max = pc;
+      offset = pc & 0x7FFC;
+      if ((offset > iwram_code_max) || (iwram_code_max == 0xFFFFFFFF))
+        iwram_code_max = offset;
       break;
 
     case 0x06: /* VRAM */
-      if((pc > vram_code_max) || (vram_code_max == 0xFFFFFFFF))
-        vram_code_max = pc;
+      if ((pc & 0x10000) != 0)
+        offset = pc & 0x17FFC;
+      else
+        offset = pc & 0x0FFFC;
+      if ((offset > vram_code_max) || (vram_code_max == 0xFFFFFFFF))
+        vram_code_max = offset;
       break;
   }
 }
@@ -3458,24 +3683,21 @@ static void partial_clear_metadata_thumb(u16* metadata, u16* metadata_area_start
  * Starts a Partial Clear of the Metadata Entry for the Data Word at the given
  * GBA address, and all adjacent Metadata Entries.
  */
-void partial_clear_metadata(u32 address)
+void partial_clear_metadata(u32 offset, u32 region)
 {
   // 1. Determine where the Metadata Entry for this Data Word is.
   u16 *metadata;
 
-  switch (address >> 24)
+  switch (region)
   {
     case 0x02: /* EWRAM */
-      metadata = ewram_metadata + (address & 0x3FFFC);
+      metadata = ewram_metadata + (offset & ~0x03);
       break;
     case 0x03: /* IWRAM */
-      metadata = iwram_metadata + (address & 0x7FFC);
+      metadata = iwram_metadata + (offset & ~0x03);
       break;
     case 0x06: /* VRAM */
-      if (address & 0x10000)
-        metadata = vram_metadata + (address & 0x17FFC);
-      else
-        metadata = vram_metadata + (address & 0xFFFC);
+      metadata = vram_metadata + (offset & ~0x03);
       break;
     default:   /* no metadata */
       return;
@@ -3490,8 +3712,8 @@ void partial_clear_metadata(u32 address)
 
   // 3. Prepare for wrapping in the Metadata Area if there's code at the
   // boundaries of the Data Area.
-  u16 *metadata_area, *metadata_area_end;
-  switch (address >> 24)
+  u16 *metadata_area = NULL, *metadata_area_end = NULL;
+  switch (region)
   {
     case 0x02: /* EWRAM */
       metadata_area = ewram_metadata;
@@ -3510,9 +3732,9 @@ void partial_clear_metadata(u32 address)
   }
 
   u16 contents = metadata[3];
-  if (contents & 0x1)
+  if ((contents & 0x1) != 0)
     partial_clear_metadata_thumb(metadata, metadata_area, metadata_area_end);
-  if (contents & 0x2)
+  if ((contents & 0x2) != 0)
     partial_clear_metadata_arm(metadata, metadata_area, metadata_area_end);
 }
 
@@ -3640,14 +3862,9 @@ void clear_metadata_area(METADATA_AREA_TYPE metadata_area,
 			{
 				iwram_block_tag_top = MIN_TAG;
 
-				if(iwram_code_min != 0xFFFFFFFF)
-				{ // iwramのキャッシュを使用していた場合
-					iwram_code_min &= 0x7FFC;
-					iwram_code_max &= 0x7FFE;
-					if (iwram_code_max & 2)
-						// Catch the last Metadata Entry for a 4-byte-aligned Thumb instruction
-						iwram_code_max += 2;
-					memset(iwram_metadata + iwram_code_min, 0, (iwram_code_max - iwram_code_min) * sizeof(u16));
+				if (iwram_code_min != 0xFFFFFFFF)
+				{
+					memset(iwram_metadata + iwram_code_min, 0, (iwram_code_max - iwram_code_min + 4) * sizeof(u16));
 					iwram_code_min = 0xFFFFFFFF;
 					iwram_code_max = 0xFFFFFFFF;
 				}
@@ -3660,14 +3877,9 @@ void clear_metadata_area(METADATA_AREA_TYPE metadata_area,
 			{
 				ewram_block_tag_top = MIN_TAG;
 
-				if(ewram_code_min != 0xFFFFFFFF)
+				if (ewram_code_min != 0xFFFFFFFF)
 				{
-					ewram_code_min &= 0x3FFFC;
-					ewram_code_max &= 0x3FFFE;
-					if (ewram_code_max & 2)
-						// Catch the last Metadata Entry for a 4-byte-aligned Thumb instruction
-						ewram_code_max += 2;
-					memset(ewram_metadata + ewram_code_min, 0, (ewram_code_max - ewram_code_min) * sizeof(u16));
+					memset(ewram_metadata + ewram_code_min, 0, (ewram_code_max - ewram_code_min + 4) * sizeof(u16));
 					ewram_code_min = 0xFFFFFFFF;
 					ewram_code_max = 0xFFFFFFFF;
 				}
@@ -3680,8 +3892,12 @@ void clear_metadata_area(METADATA_AREA_TYPE metadata_area,
 			{
 				vram_block_tag_top = MIN_TAG;
 
-				// TODO [Opt] Handle the mirroring in this area
-				memset(vram_metadata, 0, sizeof(vram_metadata));
+				if (vram_code_min != 0xFFFFFFFF)
+				{
+					memset(vram_metadata + vram_code_min, 0, (vram_code_max - vram_code_min + 4) * sizeof(u16));
+					vram_code_min = 0xFFFFFFFF;
+					vram_code_max = 0xFFFFFFFF;
+				}
 			}
 			break;
 		case METADATA_AREA_ROM:
@@ -3788,28 +4004,87 @@ void dump_translation_cache()
   printf("RO:%08X R/W:%08X\n", readonly_next_code - readonly_code_cache, writable_next_code - writable_code_cache);
 }
 
-void init_cpu(u32 BootFromBIOS) 
-{
-  u32 i;
 
-  for(i = 0; i < 16; i++)
+void set_cpu_mode(CPU_MODE_TYPE new_mode)
+{
+  CPU_MODE_TYPE cpu_mode = reg[CPU_MODE];
+
+  u32 *reg_old, *reg_new;
+
+  if (cpu_mode == new_mode) return;
+
+  reg_old = reg_mode[cpu_mode];
+  reg_new = reg_mode[new_mode];
+
+  if (new_mode != MODE_FIQ)
   {
-    reg[i] = 0;
+    reg_old[5] = reg[REG_SP];
+    reg_old[6] = reg[REG_LR];
+    reg[REG_SP] = reg_new[5];
+    reg[REG_LR] = reg_new[6];
+  }
+  else
+  {
+    s32 i;
+    for (i = 8; i < 15; i++)
+    {
+      reg_old[i - 8] = reg[i];
+      reg[i] = reg_new[i - 8];
+    }
   }
 
-  reg[REG_SP] = 0x03007F00;
-  reg[REG_PC] = BootFromBIOS
-    ? 0x00000000
-    : 0x08000000;
-  reg[REG_CPSR] = 0x0000001F;
-  reg[CPU_HALT_STATE] = CPU_ACTIVE;
-  reg[CPU_MODE] = MODE_USER;
-  reg[CHANGED_PC_STATUS] = 0;
+  reg[CPU_MODE] = new_mode;
+}
 
-  reg_mode[MODE_USER][5] = 0x03007F00;
-  reg_mode[MODE_IRQ][5] = 0x03007FA0;
-  reg_mode[MODE_FIQ][5] = 0x03007FA0;
-  reg_mode[MODE_SUPERVISOR][5] = 0x03007FE0;
+
+void cpu_interrupt(void)
+{
+  // Interrupt handler in BIOS
+  reg_mode[MODE_IRQ][6] = reg[REG_PC] + 4;
+  spsr[MODE_IRQ] = reg[REG_CPSR];
+  reg[REG_CPSR] = (reg[REG_CPSR] & ~0xFF) | 0x92; // set mode IRQ & disable IRQ
+  reg[REG_PC] = 0x00000018;
+  set_cpu_mode(MODE_IRQ);
+
+  bios_read_protect = 0xe55ec002;
+
+  reg[CPU_HALT_STATE] = CPU_ACTIVE;
+  reg[CHANGED_PC_STATUS] = 1;
+}
+
+void init_cpu(u32 BootFromBIOS) 
+{
+  memset(reg, 0, sizeof(reg));
+  memset(reg_mode, 0, sizeof(reg_mode));
+  memset(spsr, 0, sizeof(spsr));
+
+  if (BootFromBIOS != 0)
+  {
+    // boot form BIOS
+    reg[REG_PC] = 0x00000000;
+
+    reg[REG_CPSR] = 0x00000013; // supervisor mode
+    reg[REG_CPSR] |= 0x80;      // disable IRQ
+    reg[REG_CPSR] |= 0x40;      // disable FIQ
+
+    set_cpu_mode(MODE_SUPERVISOR);
+  }
+  else
+  {
+    reg[REG_PC] = 0x08000000;
+
+    reg[REG_CPSR] = 0x0000001F; // system mode
+
+    reg[REG_SP] = 0x03007F00;
+    reg_mode[MODE_USER][5] = 0x03007F00;
+    reg_mode[MODE_IRQ][5] = 0x03007FA0;
+    reg_mode[MODE_SUPERVISOR][5] = 0x03007FE0;
+
+    set_cpu_mode(MODE_USER);
+  }
+
+  reg[CPU_HALT_STATE] = CPU_ACTIVE;
+  reg[CHANGED_PC_STATUS] = 0;
 }
 
 #define cpu_savestate_body(type)                                              \

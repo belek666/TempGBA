@@ -27,7 +27,6 @@ struct ReGBA_Stats {
 	int32_t         RenderedFPS;
 	int32_t         EmulatedFPS;
 
-#ifndef USE_C_CORE
 	/* Performance statistics collectors. This set does not impact
 	 * performance of the emulator much. */
 	/* How many bytes of MIPS code have we discarded since the current
@@ -43,7 +42,6 @@ struct ReGBA_Stats {
 	uint64_t        MetadataClearCount[METADATA_AREA_COUNT][METADATA_CLEAR_REASON_COUNT];
 	/* How many times have we gone through a Partial Flush? */
 	uint64_t        PartialFlushCount;
-#endif
 	/* How many times have we detected an underrun of the sound buffer? */
 	uint64_t        SoundBufferUnderrunCount;
 	/* How many frames have we emulated since the current game started

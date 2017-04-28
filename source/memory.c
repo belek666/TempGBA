@@ -20,7 +20,6 @@
 
 #include "common.h" 
 
-// TODO:PSP-1000はフレームバッファは256KBあれば足りるので、VRAMを使用する
 u8 savestate_write_buffer[SAVESTATE_SIZE];
 u8 *g_state_buffer_ptr;
 
@@ -29,182 +28,74 @@ u8 *g_state_buffer_ptr;
 #define SAVESTATE_REWIND_NUM (10)
 u8 SAVESTATE_REWIND_MEM[ SAVESTATE_REWIND_SIZE ] __attribute__ ((aligned (4))) ;
 
-const u8 SVS_HEADER_E[SVS_HEADER_SIZE] = {'N', 'G', 'B', 'A', 'R', 'T', 'S',
-  '1', '.', '0', 'e'}; // 1.0e is written with sound frequency-dependent
-  // variables precalculated with SOUND_FREQUENCY = 65536. 1.0f is written
-  // with sound frequency-dependent variables precalculated with it at 88200.
-const u8 SVS_HEADER_F[SVS_HEADER_SIZE] = {'N', 'G', 'B', 'A', 'R', 'T', 'S',
-  '1', '.', '0', 'f'};
-
-typedef enum
-{
-  FLASH_DEVICE_MACRONIX_64KB   = 0x1C,
-  FLASH_DEVICE_AMTEL_64KB      = 0x3D,
-  FLASH_DEVICE_SST_64K         = 0xD4,
-  FLASH_DEVICE_PANASONIC_64KB  = 0x1B,
-  FLASH_DEVICE_MACRONIX_128KB  = 0x09
-} FLASH_DEVICE_ID_TYPE;
-
-typedef enum
-{
-  FLASH_MANUFACTURER_MACRONIX  = 0xC2,
-  FLASH_MANUFACTURER_AMTEL     = 0x1F,
-  FLASH_MANUFACTURER_PANASONIC = 0x32,
-  FLASH_MANUFACTURER_SST       = 0xBF
-} FLASH_MANUFACTURER_ID_TYPE;
-
-
-// 関数宣言
+const u8 SVS_HEADER_E[SVS_HEADER_SIZE] = {'R','E', 'G', 'B', 'A', 'R', 'T', 'S', '0', '.', '1', 'e'};
+const u8 SVS_HEADER_F[SVS_HEADER_SIZE] = {'R','E', 'G', 'B', 'A', 'R', 'T', 'S', '0', '.', '1', 'f'};
 
 void memory_read_mem_savestate();
 void memory_write_mem_savestate();
-u8 read_backup(u32 address);
-void write_eeprom(u32 address, u32 value);
-u32 read_eeprom();
-CPU_ALERT_TYPE write_io_register8(u32 address, u32 value);
-CPU_ALERT_TYPE write_io_register16(u32 address, u32 value);
-CPU_ALERT_TYPE write_io_register32(u32 address, u32 value);
-void write_backup(u32 address, u32 value);
-u32 encode_bcd(u8 value);
-void write_rtc(u32 address, u32 value);
-u32 save_backup();
-s32 parse_config_line(char *current_line, char *current_variable, char *current_value);
-s32 load_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker);
-char *skip_spaces(char *line_ptr);
-static s32 load_gamepak_raw(char *name);
-u32 evict_gamepak_page();
-void init_memory_gamepak();
-
-// SIO
-u32 get_sio_mode(u16 io1, u16 io2);
-u32 send_adhoc_multi();
-
-u32 g_multi_mode;
 
 
-#define SIO_NORMAL8     0
-#define SIO_NORMAL32    1
-#define SIO_MULTIPLAYER 2
-#define SIO_UART        3
-#define SIO_JOYBUS      4
-#define SIO_GP          5
-
-// This table is configured for sequential access on system defaults
-#ifdef OLD_COUNT
-u32 waitstate_cycles_sequential[16][3] =
+u8 ALIGN_DATA memory_waitstate[4][16] =
 {
-  { 1, 1, 1 }, // BIOS
-  { 1, 1, 1 }, // Invalid
-  { 3, 3, 6 }, // EWRAM (default settings)
-  { 1, 1, 1 }, // IWRAM
-  { 1, 1, 1 }, // IO Registers
-  { 1, 1, 2 }, // Palette RAM
-  { 1, 1, 2 }, // VRAM
-  { 1, 1, 2 }, // OAM
-  { 3, 3, 6 }, // Gamepak (wait 0)
-  { 3, 3, 6 }, // Gamepak (wait 0)
-  { 5, 5, 9 }, // Gamepak (wait 1)
-  { 5, 5, 9 }, // Gamepak (wait 1)
-  { 9, 9, 17 }, // Gamepak (wait 2)
-  { 9, 9, 17 }  // Gamepak (wait 2)
+  // Non-sequential
+  { 0, 0, 2, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 0 }, // 8,16bit accesses
+  { 0, 0, 5, 0, 0, 1, 1, 1, 7, 7, 9, 9,13,13, 4, 0 }, // 32bit accesses
+
+  // Sequential
+  { 0, 0, 2, 0, 0, 0, 0, 0, 2, 2, 4, 4, 8, 8, 4, 0 },
+  { 0, 0, 5, 0, 0, 1, 1, 1, 5, 5, 9, 9,17,17, 4, 0 }
 };
 
-u32 gamepak_waitstate_sequential[2][3][3] =
+u8 ALIGN_DATA fetch_waitstate[4][16] =
 {
-  {
-    { 3, 3, 6 },
-    { 5, 5, 9 },
-    { 9, 9, 17 }
-  },
-  {
-    { 2, 2, 3 },
-    { 2, 2, 3 },
-    { 2, 2, 3 }
-  }
+  // Non-sequential
+  { 0, 0, 2, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 0 }, // 8,16bit accesses
+  { 0, 0, 5, 0, 0, 1, 1, 1, 7, 7, 9, 9,13,13, 4, 0 }, // 32bit accesses
+
+  // Sequential
+  { 0, 0, 2, 0, 0, 0, 0, 0, 2, 2, 4, 4, 8, 8, 4, 0 },
+  { 0, 0, 5, 0, 0, 1, 1, 1, 5, 5, 9, 9,17,17, 4, 0 }
 };
-#else
-u8 waitstate_cycles_seq[2][16] =
-{
- /* 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
-  { 1, 1, 3, 1, 1, 1, 1, 1, 3, 3, 5, 5, 9, 9, 5, 1 }, /* 8,16bit */
-  { 1, 1, 6, 1, 1, 2, 2, 1, 5, 5, 9, 9,17,17, 1, 1 }  /* 32bit */
-};
-
-u8 waitstate_cycles_non_seq[2][16] =
-{
- /* 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
-  { 1, 1, 3, 1, 1, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 1 }, /* 8,16bit */
-  { 1, 1, 6, 1, 1, 2, 2, 1, 7, 7, 9, 9,13,13, 1, 1 }  /* 32bit */
-};
-
-// Different settings for gamepak ws0-2 sequential (2nd) access
-
-u8 gamepak_waitstate_seq[2][2][3] =
-{
-  {{ 3, 5, 9 }, { 5, 9,17 }},
-  {{ 2, 2, 2 }, { 3, 3, 3 }}
-};
-
-u8 cpu_waitstate_cycles_seq[2][16] =
-{
- /* 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F */
-  { 1, 1, 3, 1, 1, 1, 1, 1, 3, 3, 5, 5, 9, 9, 5, 1 }, /* 8,16bit */
-  { 1, 1, 6, 1, 1, 2, 2, 1, 5, 5, 9, 9,17,17, 1, 1 }  /* 32bit */
-};
-#endif
-
-u32 prescale_table[] = { 0, 6, 8, 10 };
-
-bool IsNintendoBIOS = false;
 
 // GBA memory areas.
 
-u16 palette_ram   [  0x200]; // Palette RAM             (05000000h)      1 KiB
-u16 oam_ram       [  0x200]; // Object Attribute Memory (07000000h)      1 KiB
-u16 io_registers  [ 0x4000]; // I/O Registers           (04000000h)     32 KiB
-u8  ewram_data    [0x40000]; // External Working RAM    (02000000h)    256 KiB
-u8  iwram_data    [ 0x8000]; // Internal Working RAM    (03000000h)     32 KiB
-u8  vram          [0x18000]; // Video RAM               (06000000h)     96 KiB
-struct BIOS_DATA bios;       // BIOS ROM and code tags  (00000000h)     48 KiB
-u8  gamepak_backup[0x20000]; // Backup flash/EEPROM...  (0E000000h)    128 KiB
-                             // ----------------------------------------------
-                             // Total                                  594 KiB
-
-#ifndef USE_C_CORE
+u16 ALIGN_DATA palette_ram   [  0x200]; // Palette RAM             (05000000h)      1 KiB
+u16 ALIGN_DATA oam_ram       [  0x200]; // Object Attribute Memory (07000000h)      1 KiB
+u16 ALIGN_DATA io_registers  [  0x200]; // I/O Registers           (04000000h)      1 KiB
+u8  ALIGN_DATA ewram_data    [0x40000]; // External Working RAM    (02000000h)    256 KiB
+u8  ALIGN_DATA iwram_data    [ 0x8000]; // Internal Working RAM    (03000000h)     32 KiB
+u8  ALIGN_DATA vram          [0x18000]; // Video RAM               (06000000h)     96 KiB
+struct BIOS_DATA ALIGN_DATA bios;       // BIOS ROM and code tags  (00000000h)     48 KiB
+u8  ALIGN_DATA gamepak_backup[0x20000]; // Backup flash/EEPROM...  (0E000000h)    128 KiB
+                                        // ----------------------------------------------
+                                        // Total                                  594 KiB
 /*
  * These are Metadata Areas corresponding to the Data Areas above. They
  * contain information about the native code compilation status of each
  * Data Word in that Data Area. For more information about these, see
  * "doc/partial flushing of RAM code.txt" in your source tree.
  */
-u16 iwram_metadata[ 0x8000]; // Internal Working RAM code metadata      64 KiB
-u16 ewram_metadata[0x40000]; // External Working RAM code metadata     512 KiB
-u16 vram_metadata [0x18000]; // Video RAM code metadata                192 KiB
-                             // ----------------------------------------------
-                             // Total                                  768 KiB
-#endif
-
-u32 flash_bank_offset = 0;
+u16 ALIGN_DATA ewram_metadata[0x40000]; // External Working RAM code metadata     512 KiB
+u16 ALIGN_DATA iwram_metadata[ 0x8000]; // Internal Working RAM code metadata      64 KiB
+u16 ALIGN_DATA vram_metadata [0x18000]; // Video RAM code metadata                192 KiB
+                                        // ----------------------------------------------
+                                        // Total                                  768 KiB
 
 u32 bios_read_protect;
+
+TimerType ALIGN_DATA timer[4];
+const u32 ALIGN_DATA timer_prescale_table[] = { 0, 6, 8, 10 };
+
+DmaTransferType ALIGN_DATA dma[4];
+const s32 ALIGN_DATA dma_addr_control[4] = { 2, -2, 0, 2 };
+
+// DMA Prefetch
+u32 cpu_dma_hack;
+u32 cpu_dma_last;
 
 // Keeps us knowing how much we have left.
 u8 *gamepak_rom = NULL;
 u32 gamepak_size;
-
-/******************************************************************************
- * 全局变量定义
- ******************************************************************************/
-TIMER_TYPE timer[4];                              // 定时器
-
-#ifdef USE_EXT_MEM
-u8 *gamepak_rom_resume;
-#endif
-
-DMA_TRANSFER_TYPE dma[4];
-
-u8 *memory_regions[16];
-u32 memory_limits[16];
 
 u32 gamepak_next_swap;
 
@@ -219,10 +110,10 @@ bool IsGameLoaded = false;
 bool IsZippedROM = false; // true if the current ROM came directly from a
                           // zip file (false if it was extracted to temp)
 
-u32 mem_save_flag;
+bool IsNintendoBIOS = false;
 
 // Enough to map the gamepak RAM space.
-u16 gamepak_memory_map[1024];
+u16 ALIGN_DATA gamepak_memory_map[1024];
 
 // This is global so that it can be kept open for large ROMs to swap
 // pages from, so there's no slowdown with opening and closing the file
@@ -238,18 +129,52 @@ char main_path[MAX_PATH + 1];
 // If OAM is written to:
 u32 oam_update = 1;
 
-// If GBC audio is written to:
-u32 gbc_sound_update = 0;
 
-// If the GBC audio waveform is modified:
-u32 gbc_sound_wave_update = 0;
+// RTC
+typedef enum
+{
+  RTC_DISABLED,
+  RTC_IDLE,
+  RTC_COMMAND,
+  RTC_OUTPUT_DATA,
+  RTC_INPUT_DATA
+} RTC_STATE_TYPE;
 
-// If the backup space is written (only update once this hits 0)
-u32 backup_update = 0;
+typedef enum
+{
+  RTC_COMMAND_RESET            = 0x60,
+  RTC_COMMAND_WRITE_STATUS     = 0x62,
+  RTC_COMMAND_READ_STATUS      = 0x63,
+  RTC_COMMAND_OUTPUT_TIME_FULL = 0x65,
+  RTC_COMMAND_OUTPUT_TIME      = 0x67
+} RTC_COMMAND_TYPE;
+
+typedef enum
+{
+  RTC_WRITE_TIME,
+  RTC_WRITE_TIME_FULL,
+  RTC_WRITE_STATUS
+} RTC_WRITE_MODE_TYPE;
+
+RTC_STATE_TYPE rtc_state = RTC_DISABLED;
+RTC_WRITE_MODE_TYPE rtc_write_mode;
+
+u16 ALIGN_DATA rtc_registers[3];
+u32 ALIGN_DATA rtc_data[12];
+u32 rtc_command;
+u32 rtc_status = 0x40;
+u32 rtc_data_bytes;
+s32 rtc_bit_count;
+
+static u32 encode_bcd(u8 value);
+
 
 // Write out backup file this many cycles after the most recent
 // backup write.
-const u32 write_backup_delay = 10;
+#define WRITE_BACKUP_DELAY  (10)
+
+// If the backup space is written (only update once this hits 0)
+u32 backup_update = WRITE_BACKUP_DELAY + 1;
 
 typedef enum
 {
@@ -257,18 +182,18 @@ typedef enum
   BACKUP_FLASH,
   BACKUP_EEPROM,
   BACKUP_NONE
-} backup_type_type;
+} BACKUP_TYPE_TYPE;
+
+BACKUP_TYPE_TYPE backup_type = BACKUP_NONE;
 
 typedef enum
 {
-  SRAM_SIZE_32KB,
-  SRAM_SIZE_64KB
-} sram_size_type;
+  SRAM_SIZE_32KB = 0x08000,
+  SRAM_SIZE_64KB = 0x10000
+} SRAM_SIZE_TYPE;
 
 // Keep it 32KB until the upper 64KB is accessed, then make it 64KB.
-
-backup_type_type backup_type = BACKUP_NONE;
-sram_size_type sram_size = SRAM_SIZE_32KB;
+SRAM_SIZE_TYPE sram_size = SRAM_SIZE_32KB;
 
 typedef enum
 {
@@ -277,96 +202,46 @@ typedef enum
   FLASH_ID_MODE,
   FLASH_WRITE_MODE,
   FLASH_BANKSWITCH_MODE
-} flash_mode_type;
+} FLASH_MODE_TYPE;
 
 typedef enum
 {
-  FLASH_SIZE_64KB,
-  FLASH_SIZE_128KB
-} flash_size_type;
+  FLASH_SIZE_64KB  = 0x10000,
+  FLASH_SIZE_128KB = 0x20000
+} FLASH_SIZE_TYPE;
 
-flash_mode_type flash_mode = FLASH_BASE_MODE;
+typedef enum
+{
+  FLASH_DEVICE_MACRONIX_64KB   = 0x1C,
+  FLASH_DEVICE_ATMEL_64KB      = 0x3D,
+  FLASH_DEVICE_SST_64KB        = 0xD4,
+  FLASH_DEVICE_PANASONIC_64KB  = 0x1B,
+  FLASH_DEVICE_SANYO_128KB     = 0x13,
+  FLASH_DEVICE_MACRONIX_128KB  = 0x09
+} FLASH_DEVICE_ID_TYPE;
+
+typedef enum
+{
+  FLASH_MANUFACTURER_MACRONIX  = 0xC2,
+  FLASH_MANUFACTURER_ATMEL     = 0x1F,
+  FLASH_MANUFACTURER_PANASONIC = 0x32,
+  FLASH_MANUFACTURER_SST       = 0xBF, // sanyo or sst
+  FLASH_MANUFACTURER_SANYO     = 0x62
+} FLASH_MANUFACTURER_ID_TYPE;
+
+FLASH_MODE_TYPE flash_mode = FLASH_BASE_MODE;
 u32 flash_command_position = 0;
+u32 flash_bank_offset = 0;
 
-FLASH_DEVICE_ID_TYPE flash_device_id = FLASH_DEVICE_MACRONIX_64KB;
-FLASH_MANUFACTURER_ID_TYPE flash_manufacturer_id =
- FLASH_MANUFACTURER_MACRONIX;
-flash_size_type flash_size = FLASH_SIZE_64KB;
-
-// Tilt sensor on the GBA side. It's mapped... somewhere... in the GBA address
-// space. See the read_backup function in memory.c for more information.
-u32 tilt_sensor_x;
-u32 tilt_sensor_y;
-
-u8 read_backup(u32 address)
-{
-  u8 value = 0;
-
-  if(backup_type == BACKUP_EEPROM)
-  {
-    switch(address & 0x8f00)
-    {
-      case 0x8200:
-        value = tilt_sensor_x & 255;
-        break;
-      case 0x8300:
-        value = (tilt_sensor_x >> 8) | 0x80;
-        break;
-      case 0x8400:
-        value = tilt_sensor_y & 255;
-        break;
-      case 0x8500:
-        value = tilt_sensor_y >> 8;
-        break;
-    }
-    return value;
-  }
-
-  if(backup_type == BACKUP_NONE)
-    backup_type = BACKUP_SRAM;
-
-  if(backup_type == BACKUP_SRAM)
-  {
-    value = gamepak_backup[address];
-  }
-  else
-
-  if(flash_mode == FLASH_ID_MODE)
-  {
-    /* ID manufacturer type */
-    if(address == 0x0000)
-      value = flash_manufacturer_id;
-    else
-
-    /* ID device type */
-    if(address == 0x0001)
-      value = flash_device_id;
-  }
-  else
-  {
-    value = gamepak_backup[flash_bank_offset + address];
-  }
-  return value;
-}
-
-#define read_backup8()                                                        \
-  value = read_backup(address & 0xFFFF)                                       \
-
-#define read_backup16()                                                       \
-  value = 0                                                                   \
-
-#define read_backup32()                                                       \
-  value = 0                                                                   \
-
-
-// EEPROM is 512 bytes by default; it is autodetecte as 8KB if
-// 14bit address DMAs are made (this is done in the DMA handler).
+FLASH_DEVICE_ID_TYPE flash_device_id = FLASH_DEVICE_PANASONIC_64KB;
+FLASH_MANUFACTURER_ID_TYPE flash_manufacturer_id = FLASH_MANUFACTURER_PANASONIC;
+FLASH_SIZE_TYPE flash_size = FLASH_SIZE_64KB;
 
 typedef enum
 {
-  EEPROM_512_BYTE,
-  EEPROM_8_KBYTE
-} eeprom_size_type;
+  EEPROM_512_BYTE = 0x0200,
+  EEPROM_8_KBYTE  = 0x2000
+} EEPROM_SIZE_TYPE;
 
 typedef enum
 {
@@ -378,938 +253,1072 @@ typedef enum
   EEPROM_WRITE_ADDRESS_MODE,
   EEPROM_ADDRESS_FOOTER_MODE,
   EEPROM_WRITE_FOOTER_MODE
-} eeprom_mode_type;
+} EEPROM_MODE_TYPE;
 
-
-eeprom_size_type eeprom_size = EEPROM_512_BYTE;
-eeprom_mode_type eeprom_mode = EEPROM_BASE_MODE;
+EEPROM_SIZE_TYPE eeprom_size = EEPROM_512_BYTE;
+EEPROM_MODE_TYPE eeprom_mode = EEPROM_BASE_MODE;
 u32 eeprom_address_length;
 u32 eeprom_address = 0;
-s32 eeprom_counter = 0;
-u8 eeprom_buffer[8];
+u32 eeprom_counter = 0;
+u8 ALIGN_DATA eeprom_buffer[8];
+
+char backup_filename[MAX_FILE];
+static u32 save_backup(void);
+
+char backup_id[16];
+static void load_backup_id(void);
+
+// Tilt sensor on the GBA side. It's mapped... somewhere... in the GBA address
+// space. See the read_backup function in memory.c for more information.
+u32 tilt_sensor_x;
+u32 tilt_sensor_y;
 
 
-void write_eeprom(u32 address, u32 value)
+// SIO
+typedef enum
 {
-  if(gamepak_size > 0x1FFFF00) // eeprom_v126 ?
-  {                            // ROM is restricted to 8000000h-9FFFeFFh
-    gamepak_size = 0x1FFFF00;  // (max.1FFFF00h bytes = 32MB minus 256 bytes)
-  }
+  NORMAL8,
+  NORMAL32,
+  MULTIPLAYER,
+  UART,
+  GP,
+  JOYBUS
+} SIO_MODE_TYPE;
 
-  switch(eeprom_mode)
-  {
-    case EEPROM_BASE_MODE:
-      backup_type = BACKUP_EEPROM;
-      eeprom_buffer[0] |= (value & 0x01) << (1 - eeprom_counter);
-      eeprom_counter++;
-      if(eeprom_counter == 2)
-      {
-        if(eeprom_size == EEPROM_512_BYTE)
-          eeprom_address_length = 6;
-        else
-          eeprom_address_length = 14;
+static SIO_MODE_TYPE sio_mode(u16 reg_sio_cnt, u16 reg_rcnt);
+static CPU_ALERT_TYPE sio_control(u32 value);
 
-        eeprom_counter = 0;
+u32 send_adhoc_multi();
+u32 g_multi_mode;
 
-        switch(eeprom_buffer[0] & 0x03)
-        {
-          case 0x02:
-            eeprom_mode = EEPROM_WRITE_ADDRESS_MODE;
-            break;
 
-          case 0x03:
-            eeprom_mode = EEPROM_ADDRESS_MODE;
-            break;
-        }
-        eeprom_buffer[0] = eeprom_buffer[1] = 0;
-      }
-      break;
+static void waitstate_control(u32 value);
 
-    case EEPROM_ADDRESS_MODE:
-    case EEPROM_WRITE_ADDRESS_MODE:
-      eeprom_buffer[eeprom_counter / 8]
-       |= (value & 0x01) << (7 - (eeprom_counter % 8));
-      eeprom_counter++;
-      if(eeprom_counter == eeprom_address_length)
-      {
-        if(eeprom_size == EEPROM_512_BYTE)
-        {
-          // Little endian access
-          eeprom_address = (((u32)eeprom_buffer[0] >> 2) |
-           ((u32)eeprom_buffer[1] << 6)) * 8;
-        }
-        else
-        {
-          // Big endian access
-          eeprom_address = (((u32)eeprom_buffer[1] >> 2) |
-           ((u32)eeprom_buffer[0] << 6)) * 8;
-        }
+static char *skip_spaces(char *line_ptr);
+static s32 parse_config_line(char *current_line, char *current_variable, char *current_value);
+static s32 load_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker);
+static bool lookup_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker, FILE_TAG_TYPE config_file);
 
-        eeprom_buffer[0] = eeprom_buffer[1] = 0;
-        eeprom_counter = 0;
+static void init_memory_gamepak(void);
 
-        if(eeprom_mode == EEPROM_ADDRESS_MODE)
-        {
-          eeprom_mode = EEPROM_ADDRESS_FOOTER_MODE;
-        }
-        else
-        {
-          eeprom_mode = EEPROM_WRITE_MODE;
-          memset(gamepak_backup + eeprom_address, 0, 8);
-        }
-      }
-      break;
+static s32 load_gamepak_raw(char *name);
+static u32 evict_gamepak_page(void);
 
-    case EEPROM_WRITE_MODE:
-      gamepak_backup[eeprom_address + (eeprom_counter / 8)] |=
-       (value & 0x01) << (7 - (eeprom_counter % 8));
-      eeprom_counter++;
-      if(eeprom_counter == 64)
-      {
-        backup_update = write_backup_delay;
-        eeprom_counter = 0;
-        eeprom_mode = EEPROM_WRITE_FOOTER_MODE;
-      }
-      break;
 
-    case EEPROM_ADDRESS_FOOTER_MODE:
-    case EEPROM_WRITE_FOOTER_MODE:
-      eeprom_counter = 0;
-      if(eeprom_mode == EEPROM_ADDRESS_FOOTER_MODE)
-      {
-        eeprom_mode = EEPROM_READ_HEADER_MODE;
-      }
-      else
-      {
-        eeprom_mode = EEPROM_BASE_MODE;
-      }
-      break;
-    default:
-      break;
-  }
+u8 *read_rom_block = NULL;
+u8 *read_ram_block = NULL;
+
+u32 read_rom_region = 0xFFFFFFFF;
+u32 read_ram_region = 0xFFFFFFFF;
+
+inline static CPU_ALERT_TYPE check_smc_write(u16 *metadata, u32 offset, u8 region);
+
+static u32 read_null(u32 address);
+
+static u32 read8_ram(u32 address);
+static u32 read16_ram(u32 address);
+static u32 read32_ram(u32 address);
+
+static u32 read8_bios(u32 address);
+static u32 read8_io_registers(u32 address);
+static u32 read8_palette_ram(u32 address);
+static u32 read8_oam_ram(u32 address);
+static u32 read8_gamepak(u32 address);
+static u32 read8_backup(u32 address);
+static u32 read8_open(u32 address);
+
+static u32 read16_bios(u32 address);
+static u32 read16_io_registers(u32 address);
+static u32 read16_palette_ram(u32 address);
+static u32 read16_oam_ram(u32 address);
+static u32 read16_eeprom(u32 address);
+static u32 read16_gamepak(u32 address);
+static u32 read16_backup(u32 address);
+static u32 read16_open(u32 address);
+
+static u32 read32_bios(u32 address);
+static u32 read32_io_registers(u32 address);
+static u32 read32_palette_ram(u32 address);
+static u32 read32_oam_ram(u32 address);
+static u32 read32_gamepak(u32 address);
+static u32 read32_backup(u32 address);
+static u32 read32_open(u32 address);
+
+static u32 (*mem_read8[16])(u32) =
+{
+  read8_bios,          // 0
+  read8_open,          // 1
+  read8_ram,           // 2
+  read8_ram,           // 3
+  read8_io_registers,  // 4
+  read8_palette_ram,   // 5
+  read8_ram,           // 6
+  read8_oam_ram,       // 7
+  read8_gamepak,       // 8
+  read8_gamepak,       // 9
+  read8_gamepak,       // a
+  read8_gamepak,       // b
+  read8_gamepak,       // c
+  read8_gamepak,       // d
+  read8_backup,        // e
+  read8_open           // f
+};
+
+static u32 (*mem_read16[16])(u32) =
+{
+  read16_bios,         // 0
+  read16_open,         // 1
+  read16_ram,          // 2
+  read16_ram,          // 3
+  read16_io_registers, // 4
+  read16_palette_ram,  // 5
+  read16_ram,          // 6
+  read16_oam_ram,      // 7
+  read16_gamepak,      // 8
+  read16_gamepak,      // 9
+  read16_gamepak,      // a
+  read16_gamepak,      // b
+  read16_gamepak,      // c
+  read16_eeprom,       // d
+  read16_backup,       // e
+  read16_open          // f
+};
+
+static u32 (*mem_read32[16])(u32) =
+{
+  read32_bios,         // 0
+  read32_open,         // 1
+  read32_ram,          // 2
+  read32_ram,          // 3
+  read32_io_registers, // 4
+  read32_palette_ram,  // 5
+  read32_ram,          // 6
+  read32_oam_ram,      // 7
+  read32_gamepak,      // 8
+  read32_gamepak,      // 9
+  read32_gamepak,      // a
+  read32_gamepak,      // b
+  read32_gamepak,      // c
+  read32_gamepak,      // d
+  read32_backup,       // e
+  read32_open          // f
+};
+
+static u32 (*dma_read16[16])(u32) =
+{
+  read_null,           // 0
+  read_null,           // 1
+  read16_ram,          // 2
+  read16_ram,          // 3
+  read16_io_registers, // 4
+  read16_palette_ram,  // 5
+  read16_ram,          // 6
+  read16_oam_ram,      // 7
+  read16_gamepak,      // 8
+  read16_gamepak,      // 9
+  read16_gamepak,      // a
+  read16_gamepak,      // b
+  read16_gamepak,      // c
+  read16_eeprom,       // d
+  read_null,           // e
+  read_null            // f
+};
+
+static u32 (*dma_read32[16])(u32) =
+{
+  read_null,           // 0
+  read_null,           // 1
+  read32_ram,          // 2
+  read32_ram,          // 3
+  read32_io_registers, // 4
+  read32_palette_ram,  // 5
+  read32_ram,          // 6
+  read32_oam_ram,      // 7
+  read32_gamepak,      // 8
+  read32_gamepak,      // 9
+  read32_gamepak,      // a
+  read32_gamepak,      // b
+  read32_gamepak,      // c
+  read32_gamepak,      // d
+  read_null,           // e
+  read_null            // f
+};
+
+static u32 (*open_read8[16])(u32) =
+{
+  read8_bios,          // 0
+  read_null,           // 1
+  read8_ram,           // 2
+  read8_ram,           // 3
+  read_null,           // 4
+  read_null,           // 5
+  read8_ram,           // 6
+  read_null,           // 7
+  read8_gamepak,       // 8
+  read8_gamepak,       // 9
+  read8_gamepak,       // a
+  read8_gamepak,       // b
+  read8_gamepak,       // c
+  read8_gamepak,       // d
+  read_null,           // e
+  read_null            // f
+};
+
+static u32 (*open_read16[16])(u32) =
+{
+  read16_bios,         // 0
+  read_null,           // 1
+  read16_ram,          // 2
+  read16_ram,          // 3
+  read_null,           // 4
+  read_null,           // 5
+  read16_ram,          // 6
+  read_null,           // 7
+  read16_gamepak,      // 8
+  read16_gamepak,      // 9
+  read16_gamepak,      // a
+  read16_gamepak,      // b
+  read16_gamepak,      // c
+  read16_gamepak,      // d
+  read_null,           // e
+  read_null            // f
+};
+
+static u32 (*open_read32[16])(u32) =
+{
+  read32_bios,         // 0
+  read_null,           // 1
+  read32_ram,          // 2
+  read32_ram,          // 3
+  read_null,           // 4
+  read_null,           // 5
+  read32_ram,          // 6
+  read_null,           // 7
+  read32_gamepak,      // 8
+  read32_gamepak,      // 9
+  read32_gamepak,      // a
+  read32_gamepak,      // b
+  read32_gamepak,      // c
+  read32_gamepak,      // d
+  read_null,           // e
+  read_null            // f
+};
+
+
+static CPU_ALERT_TYPE write_null(u32 address, u32 value);
+
+static CPU_ALERT_TYPE write8_ewram(u32 address, u32 value);
+static CPU_ALERT_TYPE write8_iwram(u32 address, u32 value);
+static CPU_ALERT_TYPE write8_io_registers(u32 address, u32 value);
+static CPU_ALERT_TYPE write8_palette_ram(u32 address, u32 value);
+static CPU_ALERT_TYPE write8_vram(u32 address, u32 value);
+static CPU_ALERT_TYPE write8_backup(u32 address, u32 value);
+
+static CPU_ALERT_TYPE write16_ewram(u32 address, u32 value);
+static CPU_ALERT_TYPE write16_iwram(u32 address, u32 value);
+static CPU_ALERT_TYPE write16_io_registers(u32 address, u32 value);
+static CPU_ALERT_TYPE write16_palette_ram(u32 address, u32 value);
+static CPU_ALERT_TYPE write16_vram(u32 address, u32 value);
+static CPU_ALERT_TYPE write16_oam_ram(u32 address, u32 value);
+
+static CPU_ALERT_TYPE write32_ewram(u32 address, u32 value);
+static CPU_ALERT_TYPE write32_iwram(u32 address, u32 value);
+static CPU_ALERT_TYPE write32_io_registers(u32 address, u32 value);
+static CPU_ALERT_TYPE write32_palette_ram(u32 address, u32 value);
+static CPU_ALERT_TYPE write32_vram(u32 address, u32 value);
+static CPU_ALERT_TYPE write32_oam_ram(u32 address, u32 value);
+
+static CPU_ALERT_TYPE (*mem_write8[16])(u32, u32) =
+{
+  write_null,           // 0
+  write_null,           // 1
+  write8_ewram,         // 2
+  write8_iwram,         // 3
+  write8_io_registers,  // 4
+  write8_palette_ram,   // 5
+  write8_vram,          // 6
+  write_null,           // 7
+  write_null,           // 8
+  write_null,           // 9
+  write_null,           // a
+  write_null,           // b
+  write_null,           // c
+  write_null,           // d
+  write8_backup,        // e
+  write_null            // f
+};
+
+static CPU_ALERT_TYPE (*mem_write16[16])(u32, u32) =
+{
+  write_null,           // 0
+  write_null,           // 1
+  write16_ewram,        // 2
+  write16_iwram,        // 3
+  write16_io_registers, // 4
+  write16_palette_ram,  // 5
+  write16_vram,         // 6
+  write16_oam_ram,      // 7
+  write_rtc,            // 8
+  write_null,           // 9
+  write_null,           // a
+  write_null,           // b
+  write_null,           // c
+  write_null,           // d
+  write_null,           // e
+  write_null            // f
+};
+
+static CPU_ALERT_TYPE (*mem_write32[16])(u32, u32) =
+{
+  write_null,           // 0
+  write_null,           // 1
+  write32_ewram,        // 2
+  write32_iwram,        // 3
+  write32_io_registers, // 4
+  write32_palette_ram,  // 5
+  write32_vram,         // 6
+  write32_oam_ram,      // 7
+  write_null,           // 8
+  write_null,           // 9
+  write_null,           // a
+  write_null,           // b
+  write_null,           // c
+  write_null,           // d
+  write_null,           // e
+  write_null            // f
+};
+
+static CPU_ALERT_TYPE (*dma_write16[16])(u32, u32) =
+{
+  write_null,           // 0
+  write_null,           // 1
+  write16_ewram,        // 2
+  write16_iwram,        // 3
+  write16_io_registers, // 4
+  write16_palette_ram,  // 5
+  write16_vram,         // 6
+  write16_oam_ram,      // 7
+  write_null,           // 8
+  write_null,           // 9
+  write_null,           // a
+  write_null,           // b
+  write_null,           // c
+  write_eeprom,         // d
+  write_null,           // e
+  write_null            // f
+};
+
+static CPU_ALERT_TYPE (*dma_write32[16])(u32, u32) =
+{
+  write_null,           // 0
+  write_null,           // 1
+  write32_ewram,        // 2
+  write32_iwram,        // 3
+  write32_io_registers, // 4
+  write32_palette_ram,  // 5
+  write32_vram,         // 6
+  write32_oam_ram,      // 7
+  write_null,           // 8
+  write_null,           // 9
+  write_null,           // a
+  write_null,           // b
+  write_null,           // c
+  write_null,           // d
+  write_null,           // e
+  write_null            // f
+};
+
+
+#define READ_BIOS(type, mask)                                                 \
+  if ((address >> 14) != 0)                                                   \
+    return read##type##_open(address);                                        \
+                                                                              \
+  if ((reg[REG_PC] >> 14) != 0)                                               \
+    return ADDRESS##type(&bios_read_protect, address & 0x03);                 \
+                                                                              \
+  return ADDRESS##type(bios.rom, address & mask);                             \
+
+static u32 read8_bios(u32 address)
+{
+  READ_BIOS(8, 0x3FFF);
 }
 
-#define read_memory_gamepak(type)                                             \
-  u32 gamepak_index = address >> 15;                                          \
-  u8 *map = memory_map_read[gamepak_index];                                   \
-                                                                              \
-  if(map == NULL)                                                             \
-    map = load_gamepak_page(gamepak_index & 0x3FF);                           \
-                                                                              \
-  value = ADDRESS##type(map, address & 0x7FFF)                                \
-
-#define read_open8()                                                          \
-  if(reg[REG_CPSR] & 0x20)                                                    \
-    value = read_memory8(reg[REG_PC] + 2 + (address & 0x01));                 \
-  else                                                                        \
-    value = read_memory8(reg[REG_PC] + 4 + (address & 0x03))                  \
-
-#define read_open16()                                                         \
-  if(reg[REG_CPSR] & 0x20)                                                    \
-    value = read_memory16(reg[REG_PC] + 2);                                   \
-  else                                                                        \
-    value = read_memory16(reg[REG_PC] + 4 + (address & 0x02))                 \
-
-#define read_open32()                                                         \
-  if(reg[REG_CPSR] & 0x20)                                                    \
-  {                                                                           \
-    u32 current_instruction = read_memory16(reg[REG_PC] + 2);                 \
-    value = current_instruction | (current_instruction << 16);                \
-  }                                                                           \
-  else                                                                        \
-  {                                                                           \
-    value = read_memory32(reg[REG_PC] + 4);                                   \
-  }                                                                           \
-
-u32 read_eeprom()
+static u32 read16_bios(u32 address)
 {
-  u32 value;
+  READ_BIOS(16, 0x3FFE);
+}
 
-  switch(eeprom_mode)
+static u32 read32_bios(u32 address)
+{
+  READ_BIOS(32, 0x3FFC);
+}
+
+#define READ_IO_REGISTERS(type, mask)                                         \
+  if (((address >> 10) & 0x3FFF) != 0)                                        \
+    return read##type##_open(address);                                        \
+                                                                              \
+  return ADDRESS##type(io_registers, address & mask);                         \
+
+static u32 read8_io_registers(u32 address)
+{
+  READ_IO_REGISTERS(8, 0x3FF);
+}
+
+static u32 read16_io_registers(u32 address)
+{
+  READ_IO_REGISTERS(16, 0x3FE);
+}
+
+static u32 read32_io_registers(u32 address)
+{
+  READ_IO_REGISTERS(32, 0x3FC);
+}
+
+#define READ_PALETTE_RAM(type, mask)                                          \
+  return ADDRESS##type(palette_ram, address & mask);                          \
+
+static u32 read8_palette_ram(u32 address)
+{
+  READ_PALETTE_RAM(8, 0x3FF);
+}
+
+static u32 read16_palette_ram(u32 address)
+{
+  READ_PALETTE_RAM(16, 0x3FE);
+}
+
+static u32 read32_palette_ram(u32 address)
+{
+  READ_PALETTE_RAM(32, 0x3FC);
+}
+
+#define READ_OAM_RAM(type, mask)                                              \
+  return ADDRESS##type(oam_ram, address & mask);                              \
+
+static u32 read8_oam_ram(u32 address)
+{
+  READ_OAM_RAM(8, 0x3FF);
+}
+
+static u32 read16_oam_ram(u32 address)
+{
+  READ_OAM_RAM(16, 0x3FE);
+}
+
+static u32 read32_oam_ram(u32 address)
+{
+  READ_OAM_RAM(32, 0x3FC);
+}
+
+#define READ_GAMEPAK(type, mask)                                              \
+  if ((address & 0x1FFFFFF) < gamepak_size)                                   \
+  {                                                                           \
+    u32 new_region = address >> 15;                                           \
+                                                                              \
+    if (new_region != read_rom_region)                                        \
+    {                                                                         \
+      read_rom_region = new_region;                                           \
+      read_rom_block = memory_map_read[read_rom_region];                      \
+                                                                              \
+      if (read_rom_block == NULL)                                             \
+        read_rom_block = load_gamepak_page(read_rom_region & 0x3FF);          \
+    }                                                                         \
+                                                                              \
+    return ADDRESS##type(read_rom_block, address & mask);                     \
+  }                                                                           \
+
+static u32 read8_gamepak(u32 address)
+{
+  READ_GAMEPAK(8, 0x7FFF);
+
+  return read8_open(address);
+}
+
+static u32 read16_gamepak(u32 address)
+{
+  READ_GAMEPAK(16, 0x7FFE);
+
+  return read16_open(address);
+}
+
+static u32 read32_gamepak(u32 address)
+{
+  READ_GAMEPAK(32, 0x7FFC);
+
+  return read32_open(address);
+}
+
+static u32 read16_eeprom(u32 address)
+{
+  READ_GAMEPAK(16, 0x7FFE);
+
+  return read_eeprom();
+}
+
+static u32 read8_backup(u32 address)
+{
+  return read_backup(address & 0xFFFF);
+}
+
+static u32 read16_backup(u32 address)
+{
+  u32 value = read_backup(address & 0xFFFe);
+  return value | (value << 8);
+}
+
+static u32 read32_backup(u32 address)
+{
+  u32 value = read_backup(address & 0xFFFC);
+  return value | (value << 8) | (value << 16) | (value << 24);
+}
+
+// ewram, iwram, vram
+#define READ_RAM(type, mask)                                                  \
+  u32 new_region = address >> 15;                                             \
+                                                                              \
+  if (new_region != read_ram_region)                                          \
+  {                                                                           \
+    read_ram_region = new_region;                                             \
+    read_ram_block = memory_map_read[read_ram_region];                        \
+  }                                                                           \
+                                                                              \
+  return ADDRESS##type(read_ram_block, address & mask);                       \
+
+static u32 read8_ram(u32 address)
+{
+  READ_RAM(8, 0x7FFF);
+}
+
+static u32 read16_ram(u32 address)
+{
+  READ_RAM(16, 0x7FFE);
+}
+
+static u32 read32_ram(u32 address)
+{
+  READ_RAM(32, 0x7FFC);
+}
+
+static u32 read_null(u32 address)
+{
+  return 0;
+}
+
+#define THUMB_STATE (reg[REG_CPSR] & 0x20)
+
+static u32 read8_open(u32 address)
+{
+  u32 offset = 0;
+
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last & 0xFF;
+
+  if (THUMB_STATE != 0)
+    offset = reg[REG_PC] + 2 + (address & 0x01);
+  else
+    offset = reg[REG_PC] + 4 + (address & 0x03);
+
+  return (*open_read8[offset >> 24])(offset);
+}
+
+static u32 read16_open(u32 address)
+{
+  u32 offset = 0;
+
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last & 0xFFFF;
+
+  if (THUMB_STATE != 0)
+    offset = reg[REG_PC] + 2;
+  else
+    offset = reg[REG_PC] + 4 + (address & 0x02);
+
+  return (*open_read16[offset >> 24])(offset);
+}
+
+static u32 read32_open(u32 address)
+{
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last;
+
+  if (THUMB_STATE != 0)
   {
-    case EEPROM_BASE_MODE:
-      value = 1;
-      break;
+    u32 current_instruction = (*open_read16[reg[REG_PC] >> 24])(reg[REG_PC] + 2);
+    return current_instruction | (current_instruction << 16);
+  }
 
-    case EEPROM_READ_MODE:
-      value = (gamepak_backup[eeprom_address + (eeprom_counter / 8)] >>
-       (7 - (eeprom_counter % 8))) & 0x01;
-      eeprom_counter++;
-      if(eeprom_counter == 64)
+  return (*open_read32[reg[REG_PC] >> 24])(reg[REG_PC] + 4);
+}
+
+
+inline static CPU_ALERT_TYPE check_smc_write(u16 *metadata, u32 offset, u8 region)
+{
+  /* Get the Metadata Entry's [3], bits 0-1, to see if there's code at this
+   * location. See "doc/partial flushing of RAM code.txt" for more info. */
+  u16 smc = metadata[offset | 3] & 0x03;
+  if (smc != 0) {
+    partial_clear_metadata(offset, region);
+    return CPU_ALERT_SMC;
+  }
+  return CPU_ALERT_NONE;
+}
+
+#define WRITE_EWRAM(type, mask)                                               \
+  address &= mask;                                                            \
+  ADDRESS##type(ewram_data, address) = value;                                 \
+  return check_smc_write(ewram_metadata, address, 0x02);                      \
+
+static CPU_ALERT_TYPE write8_ewram(u32 address, u32 value)
+{
+  WRITE_EWRAM(8, 0x3FFFF);
+}
+
+static CPU_ALERT_TYPE write16_ewram(u32 address, u32 value)
+{
+  WRITE_EWRAM(16, 0x3FFFE);
+}
+
+static CPU_ALERT_TYPE write32_ewram(u32 address, u32 value)
+{
+  WRITE_EWRAM(32, 0x3FFFC);
+}
+
+#define WRITE_IWRAM(type, mask)                                               \
+  address &= mask;                                                            \
+  ADDRESS##type(iwram_data, address) = value;                                 \
+  return check_smc_write(iwram_metadata, address, 0x03);                      \
+
+static CPU_ALERT_TYPE write8_iwram(u32 address, u32 value)
+{
+  WRITE_IWRAM(8, 0x7FFF);
+}
+
+static CPU_ALERT_TYPE write16_iwram(u32 address, u32 value)
+{
+  WRITE_IWRAM(16, 0x7FFE);
+}
+
+static CPU_ALERT_TYPE write32_iwram(u32 address, u32 value)
+{
+  WRITE_IWRAM(32, 0x7FFC);
+}
+
+#define WRITE_IO_REGISTERS(type, mask)                                        \
+  if (((address >> 10) & 0x3FFF) != 0)                                        \
+    return CPU_ALERT_NONE;                                                    \
+                                                                              \
+  return write_io_register##type(address & mask, value);                      \
+
+static CPU_ALERT_TYPE write8_io_registers(u32 address, u32 value)
+{
+  WRITE_IO_REGISTERS(8, 0x3FF);
+}
+
+static CPU_ALERT_TYPE write16_io_registers(u32 address, u32 value)
+{
+  WRITE_IO_REGISTERS(16, 0x3FE);
+}
+
+static CPU_ALERT_TYPE write32_io_registers(u32 address, u32 value)
+{
+  WRITE_IO_REGISTERS(32, 0x3FC);
+}
+
+static CPU_ALERT_TYPE write8_palette_ram(u32 address, u32 value)
+{
+  ADDRESS16(palette_ram, address & 0x3Fe) = value | (value << 8);
+
+  return CPU_ALERT_NONE;
+}
+
+static CPU_ALERT_TYPE write16_palette_ram(u32 address, u32 value)
+{
+  ADDRESS16(palette_ram, address & 0x3Fe) = value;
+
+  return CPU_ALERT_NONE;
+}
+
+static CPU_ALERT_TYPE write32_palette_ram(u32 address, u32 value)
+{
+  ADDRESS32(palette_ram, address & 0x3FC) = value;
+
+  return CPU_ALERT_NONE;
+}
+
+#define WRITE_VRAM(type, mask1, mask2)                                        \
+  if (((address >> 16) & 0x01) != 0)                                          \
+    address &= mask1;                                                         \
+  else                                                                        \
+    address &= mask2;                                                         \
+                                                                              \
+  ADDRESS##type(vram, address) = value;                                       \
+  return check_smc_write(vram_metadata, address, 0x06);                       \
+
+static CPU_ALERT_TYPE write8_vram(u32 address, u32 value)
+{
+  if (((address >> 16) & 0x01) != 0)
+    address &= 0x17FFe;
+  else
+    address &= 0x0FFFe;
+
+  ADDRESS16(vram, address) = value | (value << 8);
+  return check_smc_write(vram_metadata, address, 0x06);
+}
+
+static CPU_ALERT_TYPE write16_vram(u32 address, u32 value)
+{
+  WRITE_VRAM(16, 0x17FFE, 0x0FFFE);
+}
+
+static CPU_ALERT_TYPE write32_vram(u32 address, u32 value)
+{
+  WRITE_VRAM(32, 0x17FFC, 0x0FFFC);
+}
+
+#define WRITE_OAM_RAM(type, mask)                                             \
+  oam_update = 1;                                                             \
+  ADDRESS##type(oam_ram, address & mask) = value;                             \
+                                                                              \
+  return  CPU_ALERT_NONE;                                                     \
+
+static CPU_ALERT_TYPE write16_oam_ram(u32 address, u32 value)
+{
+  WRITE_OAM_RAM(16, 0x3FE);
+}
+
+static CPU_ALERT_TYPE write32_oam_ram(u32 address, u32 value)
+{
+  WRITE_OAM_RAM(32, 0x3FC);
+}
+
+static CPU_ALERT_TYPE write8_backup(u32 address, u32 value)
+{
+  return write_backup(address & 0xFFFF, value);
+}
+
+static CPU_ALERT_TYPE write_null(u32 address, u32 value)
+{
+  return CPU_ALERT_NONE;
+}
+
+
+// write io registers
+
+static SIO_MODE_TYPE sio_mode(u16 reg_sio_cnt, u16 reg_rcnt)
+{
+  if ((reg_rcnt & 0x8000) == 0x0000)
+  {
+    switch (reg_sio_cnt & 0x3000)
+    {
+      case 0x0000:
+        return NORMAL8;
+
+      case 0x1000:
+        return NORMAL32;
+
+      case 0x2000:
+        return MULTIPLAYER;
+
+      case 0x3000:
+        return UART;
+    }
+  }
+
+  if ((reg_rcnt & 0x4000) != 0)
+    return JOYBUS;
+
+  return GP;
+}
+
+// Simulate 'No connection'
+static CPU_ALERT_TYPE sio_control(u32 value)
+{
+  SIO_MODE_TYPE mode = sio_mode(value, io_registers[REG_RCNT]);
+  CPU_ALERT_TYPE alert = CPU_ALERT_NONE;
+
+  switch (mode)
+  {
+    case NORMAL8:
+    case NORMAL32:
+      if ((value & 0x80) != 0)
       {
-        eeprom_counter = 0;
-        eeprom_mode = EEPROM_BASE_MODE;
+        value &= 0xFF7F;
+
+        if ((value & 0x4001) == 0x4001)
+        {
+          io_registers[REG_IF] |= IRQ_SERIAL;
+          alert = CPU_ALERT_IRQ;
+        }
       }
       break;
 
-    case EEPROM_READ_HEADER_MODE:
-      value = 0;
-      eeprom_counter++;
-      if(eeprom_counter == 4)
-      {
-        eeprom_mode = EEPROM_READ_MODE;
-        eeprom_counter = 0;
-      }
+    case MULTIPLAYER:
+      value &= 0xFF83;
+      value |= 0x000C;
       break;
 
-    default:
-      value = 0;
+    case UART:
+    case JOYBUS:
+    case GP:
       break;
   }
 
-  return value;
+  ADDRESS16(io_registers, 0x128) = value;
+
+  return alert;
 }
 
-#define read_memory(type)                                                     \
-  switch(address >> 24)                                                       \
-  {                                                                           \
-    case 0x00:                                                                \
-      /* BIOS */                                                              \
-      if(reg[REG_PC] >= 0x4000)                                               \
-      {                                                                       \
-        if(address < 0x4000)                                                  \
-        {                                                                     \
-          value = ADDRESS##type(&bios_read_protect, address & 0x03);          \
-        }                                                                     \
-        else                                                                  \
-        {                                                                     \
-          read_open##type();                                                  \
-        }                                                                     \
-      }                                                                       \
-      else                                                                    \
-        value = ADDRESS##type(bios.rom, address & 0x3FFF);                   \
-      break;                                                                  \
-                                                                              \
-    case 0x02:                                                                \
-      /* external work RAM */                                                 \
-      value = ADDRESS##type(ewram_data, address & 0x3FFFF);                   \
-      break;                                                                  \
-                                                                              \
-    case 0x03:                                                                \
-      /* internal work RAM */                                                 \
-      value = ADDRESS##type(iwram_data, address & 0x7FFF);                    \
-      break;                                                                  \
-                                                                              \
-    case 0x04:                                                                \
-      /* I/O registers */                                                     \
-      if(address < 0x04000400)                                                \
-      {                                                                       \
-        value = ADDRESS##type(io_registers, address & 0x3FF);                 \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        read_open##type();                                                    \
-      }                                                                       \
-      break;                                                                  \
-                                                                              \
-    case 0x05:                                                                \
-      /* palette RAM */                                                       \
-      value = ADDRESS##type(palette_ram, address & 0x3FF);                    \
-      break;                                                                  \
-                                                                              \
-    case 0x06:                                                                \
-      /* VRAM */                                                              \
-      if(address & 0x10000)                                                   \
-      {                                                                       \
-        value = ADDRESS##type(vram, address & 0x17FFF);                       \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        value = ADDRESS##type(vram, address & 0x1FFFF);                       \
-      }                                                                       \
-      break;                                                                  \
-                                                                              \
-    case 0x07:                                                                \
-      /* OAM RAM */                                                           \
-      value = ADDRESS##type(oam_ram, address & 0x3FF);                        \
-      break;                                                                  \
-                                                                              \
-    case 0x08 ... 0x0C:                                                       \
-      /* gamepak ROM */                                                       \
-      if((address & 0x1FFFFFF) < gamepak_size)                                \
-      {                                                                       \
-        read_memory_gamepak(type);                                            \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        value = (address / 2) & 0xFFFF;                                       \
-      }                                                                       \
-      break;                                                                  \
-                                                                              \
-    case 0x0D:                                                                \
-      if((address & 0x1FFFFFF) < gamepak_size)                                \
-      {                                                                       \
-        read_memory_gamepak(type);                                            \
-      }                                                                       \
-      else                                                                    \
-      {                                                                       \
-        value = read_eeprom();                                                \
-      }                                                                       \
-                                                                              \
-      break;                                                                  \
-                                                                              \
-    case 0x0E:                                                                \
-    case 0x0F:                                                                \
-      read_backup##type();                                                    \
-      break;                                                                  \
-                                                                              \
-    case 0x20 ... 0xFF:                                                       \
-      value = 0;                                                              \
-      break;                                                                  \
-                                                                              \
-    default:                                                                  \
-      read_open##type();                                                      \
-      break;                                                                  \
-  }                                                                           \
+// multiモードのデータを送る
+u32 send_adhoc_multi()
+{
+  return 0;
+}
 
-#define trigger_dma(dma_number)                                               \
-  if(value & 0x8000)                                                          \
+static void waitstate_control(u32 value)
+{
+  u32 i;
+  const u8 waitstate_table[4] = { 4, 3, 2, 8 };
+  const u8 gamepak_ws0_seq[2] = { 2, 1 };
+  const u8 gamepak_ws1_seq[2] = { 4, 1 };
+  const u8 gamepak_ws2_seq[2] = { 8, 1 };
+
+  // Wait State First Access (8/16bit)
+  pMEMORY_WS16N(0x08) = pMEMORY_WS16N(0x09) = waitstate_table[(value >> 2) & 0x03];
+  pMEMORY_WS16N(0x0A) = pMEMORY_WS16N(0x0B) = waitstate_table[(value >> 5) & 0x03];
+  pMEMORY_WS16N(0x0C) = pMEMORY_WS16N(0x0D) = waitstate_table[(value >> 8) & 0x03];
+
+  // Wait State Second Access (8/16bit)
+  pMEMORY_WS16S(0x08) = pMEMORY_WS16S(0x09) = gamepak_ws0_seq[(value >>  4) & 0x01];
+  pMEMORY_WS16S(0x0A) = pMEMORY_WS16S(0x0B) = gamepak_ws1_seq[(value >>  7) & 0x01];
+  pMEMORY_WS16S(0x0C) = pMEMORY_WS16S(0x0D) = gamepak_ws2_seq[(value >> 10) & 0x01];
+
+  // SRAM Wait Control (8bit)
+  pMEMORY_WS16N(0x0e) = pMEMORY_WS16S(0x0e) =
+  pMEMORY_WS32N(0x0e) = pMEMORY_WS32S(0x0e) = waitstate_table[value & 0x03];
+
+  for (i = 0x08; i <= 0x0D; i++)
+  {
+    // Wait State First Access (32bit)
+    pMEMORY_WS32N(i) = pMEMORY_WS16N(i) + pMEMORY_WS16S(i) + 1;
+
+    // Wait State Second Access (32bit)
+    pMEMORY_WS32S(i) = (pMEMORY_WS16S(i) << 1) + 1;
+  }
+
+  // gamepak prefetch
+  if (((value >> 14) & 0x01) != 0)
+  {
+    for (i = 0x08; i <= 0x0D; i++)
+    {
+      pFETCH_WS16N(i) = 0;
+      pFETCH_WS16S(i) = 0;
+      pFETCH_WS32N(i) = 1;
+      pFETCH_WS32S(i) = 1;
+    }
+  }
+  else
+  {
+    for (i = 0x08; i <= 0x0D; i++)
+    {
+      // Prefetch Disable Bug
+      // the opcode fetch time from 1S to 1N.
+      pFETCH_WS16N(i) = pMEMORY_WS16N(i);
+      pFETCH_WS16S(i) = pMEMORY_WS16N(i);
+      pFETCH_WS32N(i) = pMEMORY_WS32N(i);
+      pFETCH_WS32S(i) = pMEMORY_WS32N(i);
+    }
+  }
+
+  ADDRESS16(io_registers, 0x204) = (ADDRESS16(io_registers, 0x204) & 0x8000) | (value & 0x7FFF);
+}
+
+
+#define trigger_dma(address)                                                  \
+{                                                                             \
+  u32 channel = (address - 0xBA) / 12;                                        \
+                                                                              \
+  DmaTransferType *_dma = dma + channel;                                      \
+                                                                              \
+  if ((value & 0x8000) != 0)                                                  \
   {                                                                           \
-    if(dma[dma_number].start_type == DMA_INACTIVE)                            \
+    _dma->dma_channel = channel;                                              \
+    _dma->source_direction = (value >>  7) & 0x03;                            \
+    _dma->repeat_type = (value >> 9) & 0x01;                                  \
+    _dma->irq = (value >> 14) & 0x01;                                         \
+                                                                              \
+    if (_dma->start_type == DMA_INACTIVE)                                     \
     {                                                                         \
       u32 start_type = (value >> 12) & 0x03;                                  \
-      u32 dest_address = ADDRESS32(io_registers, ((dma_number) * 12) + 0xB4) &\
-       0xFFFFFFF;                                                             \
+      u32 dest_address = ADDRESS32(io_registers, (address - 0x06));           \
                                                                               \
-      dma[dma_number].dma_channel = dma_number;                               \
-      dma[dma_number].source_address =                                        \
-       ADDRESS32(io_registers, ((dma_number) * 12) + 0xB0) & 0xFFFFFFF;       \
-      dma[dma_number].dest_address = dest_address;                            \
-      dma[dma_number].source_direction = (value >>  7) & 0x03;                \
-      dma[dma_number].repeat_type = (value >> 9) & 0x01;                      \
-      dma[dma_number].start_type = start_type;                                \
-      dma[dma_number].irq = (value >> 14) & 0x01;                             \
+      _dma->start_type = start_type;                                          \
+      _dma->source_address = ADDRESS32(io_registers, (address - 0x0A));       \
+      _dma->dest_address = dest_address;                                      \
                                                                               \
       /* If it is sound FIFO DMA make sure the settings are a certain way */  \
-      if(((dma_number) >= 1) && ((dma_number) <= 2) &&                        \
-       (start_type == DMA_START_SPECIAL))                                     \
+      if ((channel >= 1) && (channel <= 2) && (start_type == DMA_START_SPECIAL)) \
       {                                                                       \
-        dma[dma_number].length_type = DMA_32BIT;                              \
-        dma[dma_number].length = 4;                                           \
-        dma[dma_number].dest_direction = DMA_FIXED;                           \
-        if(dest_address == 0x40000A4)                                         \
-          dma[dma_number].direct_sound_channel = DMA_DIRECT_SOUND_B;          \
+        _dma->dest_direction = DMA_FIXED;                                     \
+        _dma->length_type = DMA_32BIT;                                        \
+        _dma->length = 4;                                                     \
+                                                                              \
+        if (dest_address == 0x40000A4)                                        \
+          _dma->direct_sound_channel = DMA_DIRECT_SOUND_B;                    \
         else                                                                  \
-          dma[dma_number].direct_sound_channel = DMA_DIRECT_SOUND_A;          \
+          _dma->direct_sound_channel = DMA_DIRECT_SOUND_A;                    \
       }                                                                       \
       else                                                                    \
       {                                                                       \
-        u32 length =                                                          \
-         ADDRESS16(io_registers, ((dma_number) * 12) + 0xB8);                 \
+        u32 length = ADDRESS16(io_registers, (address - 0x02));               \
                                                                               \
-        if(((dma_number) == 3) && ((dest_address >> 24) == 0x0D) &&           \
-         ((length & 0x1F) == 17))                                             \
-        {                                                                     \
+        if ((channel == 3) && ((dest_address >> 24) == 0x0D) && ((length & 0x1F) == 17)) \
           eeprom_size = EEPROM_8_KBYTE;                                       \
-        }                                                                     \
                                                                               \
-        if((dma_number) < 3)                                                  \
-          length &= 0x3FFF;                                                   \
-                                                                              \
-        if(length == 0)                                                       \
+        if (length == 0)                                                      \
         {                                                                     \
-          if((dma_number) == 3)                                               \
+          if (channel == 3)                                                   \
             length = 0x10000;                                                 \
           else                                                                \
             length = 0x04000;                                                 \
         }                                                                     \
                                                                               \
-        dma[dma_number].length = length;                                      \
-        dma[dma_number].length_type = (value >> 10) & 0x01;                   \
-        dma[dma_number].dest_direction = (value >> 5) & 0x03;                 \
+        _dma->dest_direction = (value >> 5) & 0x03;                           \
+        _dma->length_type = (value >> 10) & 0x01;                             \
+        _dma->length = length;                                                \
+                                                                              \
+        if (start_type == DMA_START_IMMEDIATELY)                              \
+          return dma_transfer(dma + channel);                                 \
       }                                                                       \
-                                                                              \
-      ADDRESS16(io_registers, ((dma_number) * 12) + 0xBA) = value;            \
-      if(start_type == DMA_START_IMMEDIATELY)                                 \
-        return dma_transfer(dma + (dma_number));                              \
     }                                                                         \
-  }                                                                           \
-  else                                                                        \
-  {                                                                           \
-    dma[dma_number].start_type = DMA_INACTIVE;                                \
-    dma[dma_number].direct_sound_channel = DMA_NO_DIRECT_SOUND;               \
-    ADDRESS16(io_registers, ((dma_number) * 12) + 0xBA) = value;              \
-  }                                                                           \
-
-// TODO:タイマーカウンタ周りの処理は再検討
-
-// タイマーリロード時のカウンタの設定(この時点ではタイマーにセットされない)
-// タイマースタート時にカウンタに設定される
-// ただし、32bitアクセス時には即座にタイマーにセットされる
-// 実機では0~0xFFFFだが、gpSP内部では (0x10000~1)<<prescale(0,6,8,10)の値をとる
-// 各カウンターにリロードする際にprescale分シフトされる
-// TODO:32bitアクセスと8/16bitアクセスで処理を分ける必要がある
-// 8/16ビットアクセス時には呼び出す必要がない？
-#define COUNT_TIMER(timer_number)                                             \
-  timer[timer_number].reload = 0x10000 - value;                               \
-  if(timer_number < 2)                                                        \
-  {                                                                           \
-    u32 timer_reload =                                                        \
-     timer[timer_number].reload;              \
-    SOUND_UPDATE_FREQUENCY_STEP(timer_number);                                \
-  }                                                                           \
-
-// タイマーのアクセスとカウント開始処理
-#define TRIGGER_TIMER(timer_number)                                           \
-  if(value & 0x80)                                                            \
-  {                                                                           \
-    /* スタートビットが”1”だった場合 */                                     \
-    if(timer[timer_number].status == TIMER_INACTIVE)                          \
+    else                                                                      \
     {                                                                         \
-      /* タイマーが停止していた場合 */                                        \
-      /* 各種設定をして、タイマー作動 */                                      \
+      u32 start_type = (value >> 12) & 0x03;                                  \
                                                                               \
-      /* リロード値を読み込む */                                              \
-      u32 timer_reload = timer[timer_number].reload;                          \
+      _dma->start_type = start_type;                                          \
                                                                               \
-      /* カスケードモードか判別(タイマー0以外)*/                              \
-      if(((value >> 2) & 0x01) && ((timer_number) != 0))                      \
+      if ((channel >= 1) && (channel <= 2) && (start_type == DMA_START_SPECIAL)) \
       {                                                                       \
-        /* カスケードモード */                                                \
-        timer[timer_number].status = TIMER_CASCADE;                           \
-        /* プリスケールの設定 */                                              \
-        timer[timer_number].prescale = 0;                                     \
+        _dma->dest_direction = DMA_FIXED;                                     \
+        _dma->length_type = DMA_32BIT;                                        \
       }                                                                       \
       else                                                                    \
       {                                                                       \
-        /* プリスケールモード */                                              \
-        timer[timer_number].status = TIMER_PRESCALE;                          \
-        u32 prescale = prescale_table[value & 0x03];                          \
-        /* プリスケールの設定 */                                              \
-        timer[timer_number].prescale = prescale;                              \
-      }                                                                       \
-                                                                              \
-      /* IRQの設定 */                                                         \
-      timer[timer_number].irq = (value >> 6) & 0x01;                          \
-                                                                              \
-      /* カウンタを設定 */                                                    \
-      timer[timer_number].count = timer_reload << timer[timer_number].prescale; \
-      ADDRESS16(io_registers, 0x100 + ((timer_number) * 4)) =                 \
-      0x10000 - timer_reload;                                                 \
-                                                                              \
-      if(timer[timer_number].count < execute_cycles)                          \
-        execute_cycles = timer[timer_number].count;                           \
-                                                                              \
-      if((timer_number) < 2)                                                  \
-      {                                                                       \
-        /* 小数点以下を切り捨てていたので、GBCサウンドと同様の処理にした*/   \
-        SOUND_UPDATE_FREQUENCY_STEP(timer_number);                            \
-        ADJUST_SOUND_BUFFER(timer_number, 0);                                 \
-        ADJUST_SOUND_BUFFER(timer_number, 1);                                 \
+        _dma->dest_direction = (value >> 5) & 0x03;                           \
+        _dma->length_type = (value >> 10) & 0x01;                             \
       }                                                                       \
     }                                                                         \
   }                                                                           \
   else                                                                        \
   {                                                                           \
-    if(timer[timer_number].status != TIMER_INACTIVE)                          \
-    {                                                                         \
-      timer[timer_number].status = TIMER_INACTIVE;                            \
-    }                                                                         \
+    _dma->start_type = DMA_INACTIVE;                                          \
+    _dma->direct_sound_channel = DMA_NO_DIRECT_SOUND;                         \
   }                                                                           \
-  ADDRESS16(io_registers, 0x102 + ((timer_number) * 4)) = value;              \
-
-// configure game pak access timings
-#define waitstate_control()                                                   \
-{                                                                             \
-  u8 i;                                                                       \
-  u8 waitstate_table[4] = { 5, 4, 3, 9 };                                     \
-                                                                              \
-  waitstate_cycles_non_seq[0][0x0e] = waitstate_cycles_seq[0][0x0e]           \
-   = waitstate_table[value & 0x03];                                           \
-                                                                              \
-  for(i = 0; i < 2; i++)                                                      \
-  {                                                                           \
-    waitstate_cycles_seq[i][0x08] = waitstate_cycles_seq[i][0x09]             \
-     = gamepak_waitstate_seq[(value >> 4) & 0x01][i][0];                      \
-    waitstate_cycles_seq[i][0x0A] = waitstate_cycles_seq[i][0x0B]             \
-     = gamepak_waitstate_seq[(value >> 7) & 0x01][i][1];                      \
-    waitstate_cycles_seq[i][0x0C] = waitstate_cycles_seq[i][0x0D]             \
-     = gamepak_waitstate_seq[(value >> 10) & 0x01][i][2];                     \
-  }                                                                           \
-                                                                              \
-  waitstate_cycles_non_seq[0][0x08] = waitstate_cycles_non_seq[0][0x09]       \
-   = waitstate_table[(value >> 2) & 0x03];                                    \
-  waitstate_cycles_non_seq[0][0x0A] = waitstate_cycles_non_seq[0][0x0B]       \
-   = waitstate_table[(value >> 5) & 0x03];                                    \
-  waitstate_cycles_non_seq[0][0x0C] = waitstate_cycles_non_seq[0][0x0D]       \
-   = waitstate_table[(value >> 8) & 0x03];                                    \
-                                                                              \
-  /* 32bit access ( split into two 16bit accsess ) */                         \
-  waitstate_cycles_non_seq[1][0x08] = waitstate_cycles_non_seq[1][0x09]       \
-   = (waitstate_cycles_non_seq[0][0x08] + waitstate_cycles_seq[0][0x08] - 1); \
-  waitstate_cycles_non_seq[1][0x0A] = waitstate_cycles_non_seq[1][0x0B]       \
-   = (waitstate_cycles_non_seq[0][0x0A] + waitstate_cycles_seq[0][0x0A] - 1); \
-  waitstate_cycles_non_seq[1][0x0C] = waitstate_cycles_non_seq[1][0x0D]       \
-  =  (waitstate_cycles_non_seq[0][0x0C] + waitstate_cycles_seq[0][0x0C] - 1); \
-                                                                              \
-  /* gamepak prefetch */                                                      \
-  if(value & 0x4000)                                                          \
-  {                                                                           \
-    for(i = 0x08; i <= 0x0D; i++)                                             \
-    {                                                                         \
-      cpu_waitstate_cycles_seq[0][i] = 1;                                     \
-      cpu_waitstate_cycles_seq[1][i] = 2;                                     \
-    }                                                                         \
-  }                                                                           \
-  else                                                                        \
-  {                                                                           \
-    for(i = 0; i < 2; i++)                                                    \
-    {                                                                         \
-      cpu_waitstate_cycles_seq[i][0x08] = cpu_waitstate_cycles_seq[i][0x09]   \
-       = waitstate_cycles_seq[i][0x08];                                       \
-      cpu_waitstate_cycles_seq[i][0x0A] = cpu_waitstate_cycles_seq[i][0x0B]   \
-       = waitstate_cycles_seq[i][0x0A];                                       \
-      cpu_waitstate_cycles_seq[i][0x0C] = cpu_waitstate_cycles_seq[i][0x0D]   \
-       = waitstate_cycles_seq[i][0x0C];                                       \
-    }                                                                         \
-  }                                                                           \
-                                                                              \
-  ADDRESS16(io_registers, 0x204) =                                            \
-   (ADDRESS16(io_registers, 0x204) & 0x8000) | (value & 0x7FFF);              \
 }                                                                             \
 
-#define access_register8_high(address)                                        \
-  value = (value << 8) | (ADDRESS8(io_registers, address))                    \
 
-#define access_register8_low(address)                                         \
-  value = ((ADDRESS8(io_registers, address + 1)) << 8) | value                \
+#define COUNT_TIMER(address)                                                  \
+{                                                                             \
+  u32 timer_number = (address >> 2) & 0x03;                                   \
+                                                                              \
+  timer[timer_number].reload = 0x10000 - value;                               \
+  timer[timer_number].reload_update = 1;                                      \
+}                                                                             \
 
-#define access_register16_high(address)                                       \
-  value = (value << 16) | (ADDRESS16(io_registers, address))                  \
+#define TRIGGER_TIMER(address)                                                \
+{                                                                             \
+  u32 timer_number = (address - 0x102) >> 2;                                  \
+                                                                              \
+  timer[timer_number].control_value = value;                                  \
+  timer[timer_number].control_update = 1;                                     \
+                                                                              \
+  ADDRESS16(io_registers, address) = value;                                   \
+                                                                              \
+  return CPU_ALERT_TIMER;                                                     \
+}                                                                             \
 
-#define access_register16_low(address)                                        \
-  value = ((ADDRESS16(io_registers, address + 2)) << 16) | value              \
+
+#define ACCESS_REGISTER8_HIGH(address)                                        \
+  value = ADDRESS8(io_registers, address) | (value << 8);                     \
+
+#define ACCESS_REGISTER8_LOW(address)                                         \
+  value = value | (ADDRESS8(io_registers, address + 1) << 8);                 \
+
+#define ACCESS_REGISTER16_HIGH(address)                                       \
+  value = ADDRESS16(io_registers, address) | (value << 16);                   \
+
+#define ACCESS_REGISTER16_LOW(address)                                        \
+  value = value | (ADDRESS16(io_registers, address + 2) << 16);               \
+
 
 CPU_ALERT_TYPE write_io_register8(u32 address, u32 value)
 {
   switch(address)
   {
-    case 0x00:
-      {
-        u32 dispcnt = io_registers[REG_DISPCNT];
-
-        if((value & 0x07) != (dispcnt & 0x07))
-          oam_update = 1;
-
-        ADDRESS8(io_registers, 0x00) = value;
-      }
-      break;
-
-    // DISPSTAT (lower byte)
-    case 0x04:
-      ADDRESS8(io_registers, 0x04) =
-       (ADDRESS8(io_registers, 0x04) & 0x07) | (value & ~0x07);
-      break;
-
     // VCOUNT
     case 0x06:
     case 0x07:
+      /* Read only */
       break;
 
-    // BG2 reference X
-    case 0x28:
-      access_register8_low(0x28);
-      access_register16_low(0x28);
-      affine_reference_x[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x28) = value;
-      break;
-
-    case 0x29:
-      access_register8_high(0x28);
-      access_register16_low(0x28);
-      affine_reference_x[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x28) = value;
-      break;
-
-    case 0x2A:
-      access_register8_low(0x2A);
-      access_register16_high(0x28);
-      affine_reference_x[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x28) = value;
-      break;
-
-    case 0x2B:
-      access_register8_high(0x2A);
-      access_register16_high(0x28);
-      affine_reference_x[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x28) = value;
-      break;
-
-    // BG2 reference Y
-    case 0x2C:
-      access_register8_low(0x2C);
-      access_register16_low(0x2C);
-      affine_reference_y[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x2C) = value;
-      break;
-
-    case 0x2D:
-      access_register8_high(0x2C);
-      access_register16_low(0x2C);
-      affine_reference_y[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x2C) = value;
-      break;
-
-    case 0x2E:
-      access_register8_low(0x2E);
-      access_register16_high(0x2C);
-      affine_reference_y[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x2C) = value;
-      break;
-
-    case 0x2F:
-      access_register8_high(0x2E);
-      access_register16_high(0x2C);
-      affine_reference_y[0] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x2C) = value;
-      break;
-
-    // BG3 reference X
-    case 0x38:
-      access_register8_low(0x38);
-      access_register16_low(0x38);
-      affine_reference_x[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x38) = value;
-      break;
-
-    case 0x39:
-      access_register8_high(0x38);
-      access_register16_low(0x38);
-      affine_reference_x[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x38) = value;
-      break;
-
-    case 0x3A:
-      access_register8_low(0x3A);
-      access_register16_high(0x38);
-      affine_reference_x[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x38) = value;
-      break;
-
-    case 0x3B:
-      access_register8_high(0x3A);
-      access_register16_high(0x38);
-      affine_reference_x[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x38) = value;
-      break;
-
-    // BG3 reference Y
-    case 0x3C:
-      access_register8_low(0x3C);
-      access_register16_low(0x3C);
-      affine_reference_y[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x3C) = value;
-      break;
-
-    case 0x3D:
-      access_register8_high(0x3C);
-      access_register16_low(0x3C);
-      affine_reference_y[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x3C) = value;
-      break;
-
-    case 0x3E:
-      access_register8_low(0x3E);
-      access_register16_high(0x3C);
-      affine_reference_y[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x3C) = value;
-      break;
-
-    case 0x3F:
-      access_register8_high(0x3E);
-      access_register16_high(0x3C);
-      affine_reference_y[1] = (s32)(value << 4) >> 4;
-      ADDRESS32(io_registers, 0x3C) = value;
-      break;
-
-    // Sound 1 control sweep
-    case 0x60:
-      access_register8_low(0x60);
-      GBC_SOUND_TONE_CONTROL_SWEEP();
-      break;
-
-    case 0x61:
-      access_register8_low(0x60);
-      GBC_SOUND_TONE_CONTROL_SWEEP();
-      break;
-
-    // Sound 1 control duty/length/envelope
-    case 0x62:
-      access_register8_low(0x62);
-      GBC_SOUND_TONE_CONTROL_LOW(0, 0x62);
-      break;
-
-    case 0x63:
-      access_register8_high(0x62);
-      GBC_SOUND_TONE_CONTROL_LOW(0, 0x62);
-      break;
-
-    // Sound 1 control frequency
-    case 0x64:
-      access_register8_low(0x64);
-      GBC_SOUND_TONE_CONTROL_HIGH(0, 0x64);
-      break;
-
-    case 0x65:
-      access_register8_high(0x64);
-      GBC_SOUND_TONE_CONTROL_HIGH(0, 0x64);
-      break;
-
-    // Sound 2 control duty/length/envelope
-    case 0x68:
-      access_register8_low(0x68);
-      GBC_SOUND_TONE_CONTROL_LOW(1, 0x68);
-      break;
-
-    case 0x69:
-      access_register8_high(0x68);
-      GBC_SOUND_TONE_CONTROL_LOW(1, 0x68);
-      break;
-
-    // Sound 2 control frequency
-    case 0x6C:
-      access_register8_low(0x6C);
-      GBC_SOUND_TONE_CONTROL_HIGH(1, 0x6C);
-      break;
-
-    case 0x6D:
-      access_register8_high(0x6C);
-      GBC_SOUND_TONE_CONTROL_HIGH(1, 0x6C);
-      break;
-
-    // Sound 3 control wave
-    case 0x70:
-      access_register8_low(0x70);
-      GBC_SOUND_WAVE_CONTROL();
-      break;
-
-    case 0x71:
-      access_register8_high(0x70);
-      GBC_SOUND_WAVE_CONTROL();
-      break;
-
-    // Sound 3 control length/volume
-    case 0x72:
-      access_register8_low(0x72);
-      GBC_SOUND_TONE_CONTROL_LOW_WAVE();
-      break;
-
-    case 0x73:
-      access_register8_high(0x72);
-      GBC_SOUND_TONE_CONTROL_LOW_WAVE();
-      break;
-
-    // Sound 3 control frequency
-    case 0x74:
-      access_register8_low(0x74);
-      GBC_SOUND_TONE_CONTROL_HIGH_WAVE();
-      break;
-
-    case 0x75:
-      access_register8_high(0x74);
-      GBC_SOUND_TONE_CONTROL_HIGH_WAVE();
-      break;
-
-    // Sound 4 control length/envelope
-    case 0x78:
-      access_register8_low(0x78);
-      GBC_SOUND_TONE_CONTROL_LOW(3, 0x78);
-      break;
-
-    case 0x79:
-      access_register8_high(0x78);
-      GBC_SOUND_TONE_CONTROL_LOW(3, 0x78);
-      break;
-
-    // Sound 4 control frequency
-    case 0x7C:
-      access_register8_low(0x7C);
-      GBC_SOUND_NOISE_CONTROL();
-      break;
-
-    case 0x7D:
-      access_register8_high(0x7C);
-      GBC_SOUND_NOISE_CONTROL();
-      break;
-
-    // Sound control L
-    case 0x80:
-      access_register8_low(0x80);
-      GBC_TRIGGER_SOUND();
-      break;
-
-    case 0x81:
-      access_register8_high(0x80);
-      GBC_TRIGGER_SOUND();
-      break;
-
-    // Sound control H
-    case 0x82:
-      access_register8_low(0x82);
-      TRIGGER_SOUND();
-      break;
-
-    case 0x83:
-      access_register8_high(0x82);
-      TRIGGER_SOUND();
-      break;
-
-    // Sound control X
-    case 0x84:
-      SOUND_ON();
-      break;
-
-    // Sound wave RAM
-    case 0x90 ... 0x9F:
-      gbc_sound_wave_update = 1;
-      ADDRESS8(io_registers, address) = value;
-      break;
-
-    // Sound FIFO A
-    case 0xA0 ... 0xA3:
-      ADDRESS8(io_registers, address) = value;
-      sound_timer_queue32(0);
-      break;
-
-    // Sound FIFO B
-    case 0xA4 ... 0xA7:
-      ADDRESS8(io_registers, address) = value;
-      sound_timer_queue32(1);
-      break;
-
-    // DMA control (trigger byte)
-    case 0xBB:  // DMA channel 0
-    case 0xC7:  // DMA channel 1
-    case 0xD3:  // DMA channel 2
-    case 0xDF:  // DMA channel 3
-      access_register8_high(address - 1);
-      trigger_dma((address - 0xBB) / 12);
-      break;
-
-    // Timer counts
-    case 0x100:
-      access_register8_low(0x100);
-      COUNT_TIMER(0);
-      break;
-
-    case 0x101:
-      access_register8_high(0x100);
-      COUNT_TIMER(0);
-      break;
-
-    case 0x104:
-      access_register8_low(0x104);
-      COUNT_TIMER(1);
-      break;
-
-    case 0x105:
-      access_register8_high(0x104);
-      COUNT_TIMER(1);
-      break;
-
-    case 0x108:
-      access_register8_low(0x108);
-      COUNT_TIMER(2);
-      break;
-
-    case 0x109:
-      access_register8_high(0x108);
-      COUNT_TIMER(2);
-      break;
-
-    case 0x10C:
-      access_register8_low(0x10C);
-      COUNT_TIMER(3);
-      break;
-
-    case 0x10D:
-      access_register8_high(0x10C);
-      COUNT_TIMER(3);
-      break;
-
-    // Timer control (trigger byte)
-    case 0x103:  // Timer 0
-    case 0x107:  // Timer 1
-    case 0x10B:  // Timer 2
-    case 0x10F:  // Timer 3
-      access_register8_high(address - 1);
-      TRIGGER_TIMER((address - 0x103) / 4);
-      break;
-
-    case 0x128:
-#ifdef USE_ADHOC
-      if(g_adhoc_link_flag == NO)
-        ADDRESS8(io_registers, 0x128) |= 0x0C;
-#endif
-      break;
-
-    case 0x129:
-    case 0x134:
-    case 0x135:
     // P1
     case 0x130:
     case 0x131:
       /* Read only */
       break;
 
-      // IE
-      case 0x200:
-        ADDRESS8(io_registers, 0x200) = value;
-        break;
-
-      case 0x201:
-        ADDRESS8(io_registers, 0x201) = value;
-        break;
-
-    // IF
-    case 0x202:
-      ADDRESS8(io_registers, 0x202) &= ~value;
-      break;
-
-    case 0x203:
-      ADDRESS8(io_registers, 0x203) &= ~value;
-      break;
-
-    // WAITCNT
-    case 0x204:
-#ifndef OLD_COUNT
-      access_register8_low(0x204);
-      waitstate_control();
-#endif
-      break;
-
-    case 0x205:
-#ifndef OLD_COUNT
-      access_register8_high(0x204);
-      waitstate_control();
-#endif
+    // Post Boot
+    case 0x300:
+      ADDRESS8(io_registers, 0x300) = value;
       break;
 
     // Halt
     case 0x301:
-      if(value & 0x80)
+      if ((value & 0x80) != 0)
         reg[CPU_HALT_STATE] = CPU_STOP;
       else
         reg[CPU_HALT_STATE] = CPU_HALT;
+
+      ADDRESS8(io_registers, 0x301) = value;
       return CPU_ALERT_HALT;
 
     default:
-      ADDRESS8(io_registers, address) = value;
-      break;
+      if ((address & 0x01) != 0)
+      {
+        address &= ~0x01;
+        ACCESS_REGISTER8_HIGH(address);
+      }
+      else
+      {
+        ACCESS_REGISTER8_LOW(address);
+      }
+      return write_io_register16(address, value);
   }
 
   return CPU_ALERT_NONE;
 }
 
+
 CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
 {
   switch(address)
   {
+    // DISPCNT
     case 0x00:
     {
-      u32 dispcnt = io_registers[REG_DISPCNT];
-      if((value & 0x07) != (dispcnt & 0x07))
+      u16 bg_mode = value & 0x07;
+      u16 dispcnt = io_registers[REG_DISPCNT];
+
+      if (bg_mode > 5)
+        value &= 0x07;
+
+      if (bg_mode != (dispcnt & 0x07))
         oam_update = 1;
+
+      if ((((dispcnt ^ value) & 0x80) != 0) && ((value & 0x80) == 0))
+      {
+        if ((io_registers[REG_DISPSTAT] & 0x01) == 0)
+          io_registers[REG_DISPSTAT] &= 0xFFFC;
+      }
 
       ADDRESS16(io_registers, 0x00) = value;
       break;
@@ -1323,57 +1332,57 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
 
     // VCOUNT
     case 0x06:
+      /* Read only */
       break;
 
     // BG2 reference X
     case 0x28:
-      access_register16_low(0x28);
+      ACCESS_REGISTER16_LOW(0x28);
       affine_reference_x[0] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x28) = value;
       break;
 
     case 0x2A:
-      access_register16_high(0x28);
+      ACCESS_REGISTER16_HIGH(0x28);
       affine_reference_x[0] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x28) = value;
       break;
 
     // BG2 reference Y
     case 0x2C:
-      access_register16_low(0x2C);
+      ACCESS_REGISTER16_LOW(0x2C);
       affine_reference_y[0] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x2C) = value;
       break;
 
     case 0x2E:
-      access_register16_high(0x2C);
+      ACCESS_REGISTER16_HIGH(0x2C);
       affine_reference_y[0] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x2C) = value;
       break;
 
     // BG3 reference X
-
     case 0x38:
-      access_register16_low(0x38);
+      ACCESS_REGISTER16_LOW(0x38);
       affine_reference_x[1] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x38) = value;
       break;
 
     case 0x3A:
-      access_register16_high(0x38);
+      ACCESS_REGISTER16_HIGH(0x38);
       affine_reference_x[1] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x38) = value;
       break;
 
     // BG3 reference Y
     case 0x3C:
-      access_register16_low(0x3C);
+      ACCESS_REGISTER16_LOW(0x3C);
       affine_reference_y[1] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x3C) = value;
       break;
 
     case 0x3E:
-      access_register16_high(0x3C);
+      ACCESS_REGISTER16_HIGH(0x3C);
       affine_reference_y[1] = (s32)(value << 4) >> 4;
       ADDRESS32(io_registers, 0x3C) = value;
       break;
@@ -1445,7 +1454,7 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
 
     // Sound wave RAM
     case 0x90 ... 0x9E:
-      gbc_sound_wave_update = 1;
+      GBA_SOUND_WAVE_PATTERN_RAM16();
       ADDRESS16(io_registers, address) = value;
       break;
 
@@ -1453,14 +1462,33 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
     case 0xA0:
     case 0xA2:
       ADDRESS16(io_registers, address) = value;
-      sound_timer_queue32(0);
+      sound_timer_queue(0);
       break;
 
     // Sound FIFO B
     case 0xA4:
     case 0xA6:
       ADDRESS16(io_registers, address) = value;
-      sound_timer_queue32(1);
+      sound_timer_queue(1);
+      break;
+
+    // DMA Source Address High (internal memory)
+    case 0xB2:
+    // DMA Destination Address High (internal memory)
+    case 0xB6: case 0xC2: case 0xCE:
+      ADDRESS16(io_registers, address) = value & 0x07FF;
+      break;
+
+    // DMA Source Address High (any memory)
+    case 0xBE: case 0xCA: case 0xD6:
+    // DMA Destination Address High (any memory)
+    case 0xDA:
+      ADDRESS16(io_registers, address) = value & 0x0FFF;
+      break;
+
+    // DMA Word Count (14 bit)
+    case 0xB8: case 0xC4: case 0xD0:
+      ADDRESS16(io_registers, address) = value & 0x3FFF;
       break;
 
     // DMA control
@@ -1468,7 +1496,8 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
     case 0xC6:  // DMA channel 1
     case 0xD2:  // DMA channel 2
     case 0xDE:  // DMA channel 3
-      trigger_dma((address - 0xBA) / 12);
+      ADDRESS16(io_registers, address) = value;
+      trigger_dma(address);
       break;
 
     // Timer counts
@@ -1476,7 +1505,7 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
     case 0x104:
     case 0x108:
     case 0x10C:
-      COUNT_TIMER((address - 0x100) / 4);
+      COUNT_TIMER(address);
       break;
 
     // Timer control
@@ -1484,7 +1513,7 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
     case 0x106:  // Timer 1
     case 0x10A:  // Timer 2
     case 0x10E:  // Timer 3
-      TRIGGER_TIMER((address - 0x102) / 4);
+      TRIGGER_TIMER(address);
       break;
 
 #ifdef USE_ADHOC
@@ -1506,12 +1535,12 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
 //      15    Not used           (Read only, always 0)
     case 0x128:
       if(g_adhoc_link_flag == NO)
-        ADDRESS16(io_registers, 0x128) |= 0x0C;
+        return sio_control(value);
       else
       {
-        switch(get_sio_mode(value, ADDRESS16(io_registers, 0x134)))
+        switch(sio_mode(value, ADDRESS16(io_registers, 0x134)))
         {
-          case SIO_MULTIPLAYER: // マルチプレイヤーモード
+          case MULTIPLAYER:  // マルチプレイヤーモード
             if(value & 0x80) // bit7(start bit)が1の時 転送開始命令
             {
               if(!g_multi_id)  // 親モードの時 g_multi_id = 0
@@ -1555,9 +1584,9 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
         ADDRESS16(io_registers, 0x134) = 0;
         return CPU_ALERT_NONE;
       }
-      switch(get_sio_mode(ADDRESS16(io_registers, 0x128), value))
+      switch(sio_mode(ADDRESS16(io_registers, 0x128), value))
       {
-        case SIO_MULTIPLAYER:
+        case MULTIPLAYER:
           value &= 0xc0f0;
           value |= 3;
           if(g_multi_id) value |= 4;
@@ -1572,34 +1601,53 @@ CPU_ALERT_TYPE write_io_register16(u32 address, u32 value)
       break;
 #else
     case 0x128:
-      ADDRESS16(io_registers, 0x128) |= 0x0C;
+      return sio_control(value);
       break;
 #endif
 
-    // IE
-    case 0x200:
-      ADDRESS16(io_registers, 0x200) = value;
+    // P1
+    case 0x130:
+      /* Read only */
       break;
 
-    // Interrupt flag
+    // IE - Interrupt Enable Register
+    case 0x200:
+      value &= 0x3FFF;
+      ADDRESS16(io_registers, 0x200) = value;
+      if (((value & io_registers[REG_IF]) != 0) && GBA_IME_STATE && ARM_IRQ_STATE)
+      {
+        return CPU_ALERT_IRQ;
+      }
+      break;
+
+    // IF - Interrupt Request flags
     case 0x202:
-      ADDRESS16(io_registers, 0x202) &= ~value;
+      ADDRESS16(io_registers, 0x202) &= (~value & 0x3FFF);
       break;
 
     // WAITCNT
     case 0x204:
-#ifndef OLD_COUNT
-      waitstate_control();
-#endif
+      waitstate_control(value);
+      break;
+
+    // IME - Interrupt Master Enable Register
+    case 0x208:
+      value &= 0x0001;
+      ADDRESS16(io_registers, 0x208) = value;
+      if (((io_registers[REG_IE] & io_registers[REG_IF]) != 0) && (value != 0) && ARM_IRQ_STATE)
+      {
+        return CPU_ALERT_IRQ;
+      }
       break;
 
     // Halt
     case 0x300:
-      if(value & 0x8000)
+      if ((value & 0x8000) != 0)
         reg[CPU_HALT_STATE] = CPU_STOP;
       else
         reg[CPU_HALT_STATE] = CPU_HALT;
 
+      ADDRESS16(io_registers, 0x300) = value;
       return CPU_ALERT_HALT;
 
     default:
@@ -1642,25 +1690,40 @@ CPU_ALERT_TYPE write_io_register32(u32 address, u32 value)
     // Sound FIFO A
     case 0xA0:
       ADDRESS32(io_registers, 0xA0) = value;
-      sound_timer_queue32(0);
+      sound_timer_queue(0);
       break;
 
     // Sound FIFO B
     case 0xA4:
       ADDRESS32(io_registers, 0xA4) = value;
-      sound_timer_queue32(1);
+      sound_timer_queue(1);
+      break;
+
+    // DMA Source Address (internal memory)
+    case 0xB0:
+    // DMA Destination Address (internal memory)
+    case 0xB4: case 0xC0: case 0xCC:
+      ADDRESS32(io_registers, address) = value & 0x07FFFFFF;
+      break;
+
+    // DMA Source Address (any memory)
+    case 0xBC: case 0xC8: case 0xD4:
+    // DMA Destination Address (any memory)
+    case 0xD8:
+      ADDRESS32(io_registers, address) = value & 0x0FFFFFFF;
+      break;
+
+    // SIO Data (Normal-32bit Mode)
+    case 0x120:
+    // SIO JOY Bus
+    case 0x150: case 0x154:
+      ADDRESS32(io_registers, address) = value;
       break;
 
     default:
     {
-      CPU_ALERT_TYPE alert_low =
-        write_io_register16(address, value & 0xFFFF);
-
-      CPU_ALERT_TYPE alert_high =
-        write_io_register16(address + 2, value >> 16);
-
-//      if(alert_high)
-//        return alert_high;
+      CPU_ALERT_TYPE alert_low  = write_io_register16(address, value & 0xFFFF);
+      CPU_ALERT_TYPE alert_high = write_io_register16(address + 2, value >> 16);
 
       return alert_high | alert_low;
     }
@@ -1669,23 +1732,222 @@ CPU_ALERT_TYPE write_io_register32(u32 address, u32 value)
   return CPU_ALERT_NONE;
 }
 
-#define write_palette8(address, value)                                        \
-  ADDRESS16(palette_ram, (address & ~0x01)) = ((value << 8) | value)          \
 
-#define write_palette16(address, value)                                       \
-  ADDRESS16(palette_ram, address) = value                                     \
+// EEPROM is 512 bytes by default; it is autodetecte as 8KB if
+// 14bit address DMAs are made (this is done in the DMA handler).
 
-#define write_palette32(address, value)                                       \
-  ADDRESS32(palette_ram, address) = value                                     \
-
-
-void write_backup(u32 address, u32 value)
+CPU_ALERT_TYPE write_eeprom(u32 address, u32 value)
 {
-  value &= 0xFF;
+  // ROM is restricted to 8000000h-9FFFeFFh
+  // (max.1FFFF00h bytes = 32MB minus 256 bytes)
+  if (gamepak_size > 0x1FFFF00)
+  {
+    gamepak_size = 0x1FFFF00;
+  }
+
+  switch(eeprom_mode)
+  {
+    case EEPROM_BASE_MODE:
+      backup_type = BACKUP_EEPROM;
+      eeprom_buffer[0] |= (value & 0x01) << (1 - eeprom_counter);
+      eeprom_counter++;
+      if(eeprom_counter == 2)
+      {
+        if(eeprom_size == EEPROM_512_BYTE)
+          eeprom_address_length = 6;
+        else
+          eeprom_address_length = 14;
+
+        eeprom_counter = 0;
+
+        switch(eeprom_buffer[0] & 0x03)
+        {
+          case 0x02:
+            eeprom_mode = EEPROM_WRITE_ADDRESS_MODE;
+            break;
+
+          case 0x03:
+            eeprom_mode = EEPROM_ADDRESS_MODE;
+            break;
+        }
+        eeprom_buffer[0] = 0;
+        eeprom_buffer[1] = 0;
+      }
+      break;
+
+    case EEPROM_ADDRESS_MODE:
+    case EEPROM_WRITE_ADDRESS_MODE:
+      eeprom_buffer[eeprom_counter / 8] |= (value & 0x01) << (7 - (eeprom_counter % 8));
+      eeprom_counter++;
+      if(eeprom_counter == eeprom_address_length)
+      {
+        if(eeprom_size == EEPROM_512_BYTE)
+        {
+          // Little endian access
+          eeprom_address = (((u32)eeprom_buffer[0] >> 2) | ((u32)eeprom_buffer[1] << 6)) * 8;
+        }
+        else
+        {
+          // Big endian access
+          eeprom_address = (((u32)eeprom_buffer[1] >> 2) | ((u32)eeprom_buffer[0] << 6)) * 8;
+        }
+        eeprom_buffer[0] = 0;
+        eeprom_buffer[1] = 0;
+
+        eeprom_counter = 0;
+
+        if(eeprom_mode == EEPROM_ADDRESS_MODE)
+        {
+          eeprom_mode = EEPROM_ADDRESS_FOOTER_MODE;
+        }
+        else
+        {
+          eeprom_mode = EEPROM_WRITE_MODE;
+          memset(gamepak_backup + eeprom_address, 0, 8);
+        }
+      }
+      break;
+
+    case EEPROM_WRITE_MODE:
+      gamepak_backup[eeprom_address + (eeprom_counter / 8)] |= (value & 0x01) << (7 - (eeprom_counter % 8));
+      eeprom_counter++;
+      if(eeprom_counter == 64)
+      {
+        backup_update = WRITE_BACKUP_DELAY;
+        eeprom_mode = EEPROM_WRITE_FOOTER_MODE;
+        eeprom_counter = 0;
+      }
+      break;
+
+    case EEPROM_ADDRESS_FOOTER_MODE:
+    case EEPROM_WRITE_FOOTER_MODE:
+      eeprom_counter = 0;
+      if(eeprom_mode == EEPROM_ADDRESS_FOOTER_MODE)
+        eeprom_mode = EEPROM_READ_HEADER_MODE;
+      else
+        eeprom_mode = EEPROM_BASE_MODE;
+      break;
+
+    default:
+    case EEPROM_READ_MODE:
+    case EEPROM_READ_HEADER_MODE:
+      break;
+  }
+
+  return CPU_ALERT_NONE;
+}
+
+u32 read_eeprom(void)
+{
+  u32 value;
+
+  switch(eeprom_mode)
+  {
+    case EEPROM_BASE_MODE:
+      value = 1;
+      break;
+
+    case EEPROM_READ_MODE:
+      value = (gamepak_backup[eeprom_address + (eeprom_counter / 8)] >> (7 - (eeprom_counter % 8))) & 0x01;
+      eeprom_counter++;
+      if(eeprom_counter == 64)
+      {
+        eeprom_mode = EEPROM_BASE_MODE;
+        eeprom_counter = 0;
+      }
+      break;
+
+    case EEPROM_READ_HEADER_MODE:
+      value = 0;
+      eeprom_counter++;
+      if(eeprom_counter == 4)
+      {
+        eeprom_mode = EEPROM_READ_MODE;
+        eeprom_counter = 0;
+      }
+      break;
+
+    default:
+      value = 0;
+      break;
+  }
+
+  return value;
+}
+
+
+u8 read_backup(u32 address)
+{
+  u8 value = 0;
 
   if(backup_type == BACKUP_NONE)
     backup_type = BACKUP_SRAM;
 
+  switch (backup_type)
+  {
+    case BACKUP_SRAM:
+      value = gamepak_backup[address];
+      break;
+
+    case BACKUP_FLASH:
+      if(flash_mode == FLASH_ID_MODE)
+      {
+        /* ID manufacturer type */
+        if(address == 0x0000)
+          value = flash_manufacturer_id;
+        else
+        /* ID device type */
+        if(address == 0x0001)
+          value = flash_device_id;
+      }
+      else
+      {
+        value = gamepak_backup[flash_bank_offset + address];
+      }
+      break;
+
+    case BACKUP_EEPROM:
+      // Tilt Sensor
+      switch(address)
+      {
+        case 0x8200:
+          value = tilt_sensor_x & 255;
+          break;
+        case 0x8300:
+          value = (tilt_sensor_x >> 8) | 0x80;
+          break;
+        case 0x8400:
+          value = tilt_sensor_y & 255;
+          break;
+        case 0x8500:
+          value = tilt_sensor_y >> 8;
+          break;
+      }
+      break;
+
+    case BACKUP_NONE:
+      break;
+  }
+
+  return value;
+}
+
+CPU_ALERT_TYPE write_backup(u32 address, u32 value)
+{
+  value &= 0xFF;
+
+  // Tilt Sensor
+  if (backup_type == BACKUP_EEPROM)
+  {
+    // E008000h (W) Write 55h to start sampling
+    // E008100h (W) Write AAh to start sampling
+    return CPU_ALERT_NONE;
+  }
+
+  if (backup_type == BACKUP_NONE)
+  {
+    backup_type = BACKUP_SRAM;
+  }
 
   // gamepak SRAM or Flash ROM
   if((address == 0x5555) && (flash_mode != FLASH_WRITE_MODE))
@@ -1703,10 +1965,8 @@ void write_backup(u32 address, u32 value)
         case 0x90:
           // Enter ID mode, this also tells the emulator that we're using
           // flash, not SRAM
-
           if(flash_mode == FLASH_BASE_MODE)
             flash_mode = FLASH_ID_MODE;
-
           break;
 
         case 0x80:
@@ -1731,6 +1991,7 @@ void write_backup(u32 address, u32 value)
           // Bank switch
           // Here the chip is now officially 128KB.
           flash_size = FLASH_SIZE_128KB;
+
           if(flash_mode == FLASH_BASE_MODE)
             flash_mode = FLASH_BANKSWITCH_MODE;
           break;
@@ -1743,7 +2004,8 @@ void write_backup(u32 address, u32 value)
               memset(gamepak_backup, 0xFF, 1024 * 64);
             else
               memset(gamepak_backup, 0xFF, 1024 * 128);
-            backup_update = write_backup_delay;
+
+            backup_update = WRITE_BACKUP_DELAY;
             flash_mode = FLASH_BASE_MODE;
           }
           break;
@@ -1753,139 +2015,77 @@ void write_backup(u32 address, u32 value)
       }
       flash_command_position = 0;
     }
-    if(backup_type == BACKUP_SRAM)
+
+    if (backup_type == BACKUP_SRAM)
+    {
+      backup_update = WRITE_BACKUP_DELAY;
       gamepak_backup[0x5555] = value;
-  }
-  else
-
-  if((address == 0x2AAA) && (value == 0x55) &&
-   (flash_command_position == 1))
-  {
-    flash_command_position = 2;
+    }
   }
   else
   {
-    if((flash_command_position == 2) &&
-     (flash_mode == FLASH_ERASE_MODE) && (value == 0x30))
+    if((flash_command_position == 1) && (address == 0x2AAA) && (value == 0x55))
     {
-      // Erase sector
-      memset(gamepak_backup + flash_bank_offset + (address & 0xF000), 0xFF, 1024 * 4);
-      backup_update = write_backup_delay;
-      flash_mode = FLASH_BASE_MODE;
-      flash_command_position = 0;
+      flash_command_position = 2;
     }
     else
+    {
+      if((flash_command_position == 2) && (flash_mode == FLASH_ERASE_MODE) && (value == 0x30))
+      {
+        // Erase sector
+        memset(gamepak_backup + flash_bank_offset + (address & 0xF000), 0xFF, 1024 * 4);
+        backup_update = WRITE_BACKUP_DELAY;
+        flash_mode = FLASH_BASE_MODE;
+        flash_command_position = 0;
+      }
+      else
+      {
+        if((flash_command_position == 0) && (address == 0x0000) && (flash_mode == FLASH_BANKSWITCH_MODE) && (flash_size == FLASH_SIZE_128KB))
+        {
+          flash_bank_offset = ((value & 0x01) * (1024 * 64));
+          flash_mode = FLASH_BASE_MODE;
+        }
+        else
+        {
+          if((flash_command_position == 0) && (flash_mode == FLASH_WRITE_MODE))
+          {
+            // Write value to flash ROM
+            backup_update = WRITE_BACKUP_DELAY;
 
-    if((flash_command_position == 0) &&
-     (flash_mode == FLASH_BANKSWITCH_MODE) && (address == 0x0000) &&
-     (flash_size == FLASH_SIZE_128KB))
-    {
-      flash_bank_offset = ((value & 0x01) * (1024 * 64));
-      flash_mode = FLASH_BASE_MODE;
+            gamepak_backup[flash_bank_offset + address] = value;
+            flash_mode = FLASH_BASE_MODE;
+          }
+        }
+      }
     }
-    else
-
-    if((flash_command_position == 0) && (flash_mode == FLASH_WRITE_MODE))
-    {
-      // Write value to flash ROM
-      backup_update = write_backup_delay;
-      gamepak_backup[flash_bank_offset + address] = value;
-      flash_mode = FLASH_BASE_MODE;
-    }
-    else
 
     if(backup_type == BACKUP_SRAM)
     {
       // Write value to SRAM
-      backup_update = write_backup_delay;
+      backup_update = WRITE_BACKUP_DELAY;
+
       // Hit 64KB territory?
       if(address >= 0x8000)
         sram_size = SRAM_SIZE_64KB;
+
       gamepak_backup[address] = value;
     }
   }
+
+  return CPU_ALERT_NONE;
 }
 
-#define write_backup8()                                                       \
-  write_backup(address & 0xFFFF, value)                                       \
-
-#define write_backup16()                                                      \
-
-#define write_backup32()                                                      \
-
-// TODO bitmapモードにより動作に違いがある
-#define write_vram8()                                                         \
-  address &= 0x1FFFE;                                                         \
-  if(address >= 0x18000)                                                      \
-    address -= 0x8000;                                                        \
-  ADDRESS16(vram, address) = ((value << 8) | value)                           \
-
-#define write_vram16()                                                        \
-  address &= 0x1FFFF;                                                         \
-  if(address >= 0x18000)                                                      \
-    address -= 0x8000;                                                        \
-  ADDRESS16(vram, address) = value                                            \
-
-#define write_vram32()                                                        \
-  address &= 0x1FFFF;                                                         \
-  if(address >= 0x18000)                                                      \
-    address -= 0x8000;                                                        \
-  ADDRESS32(vram, address) = value                                            \
-
-#define write_oam_ram8()                                                      \
-
-#define write_oam_ram16()                                                     \
-  oam_update = 1;                                                             \
-  ADDRESS16(oam_ram, address & 0x3FF) = value                                 \
-
-#define write_oam_ram32()                                                     \
-  oam_update = 1;                                                             \
-  ADDRESS32(oam_ram, address & 0x3FF) = value                                 \
 
 // RTC code derived from VBA's (due to lack of any real publically available
 // documentation...)
 
-typedef enum
-{
-  RTC_DISABLED,
-  RTC_IDLE,
-  RTC_COMMAND,
-  RTC_OUTPUT_DATA,
-  RTC_INPUT_DATA
-} rtc_state_type;
-
-typedef enum
-{
-  RTC_COMMAND_RESET            = 0x60,
-  RTC_COMMAND_WRITE_STATUS     = 0x62,
-  RTC_COMMAND_READ_STATUS      = 0x63,
-  RTC_COMMAND_OUTPUT_TIME_FULL = 0x65,
-  RTC_COMMAND_OUTPUT_TIME      = 0x67
-} rtc_command_type;
-
-typedef enum
-{
-  RTC_WRITE_TIME,
-  RTC_WRITE_TIME_FULL,
-  RTC_WRITE_STATUS
-} rtc_write_mode_type;
-
-rtc_state_type rtc_state = RTC_DISABLED;
-rtc_write_mode_type rtc_write_mode;
-u8 rtc_registers[3];
-u32 rtc_command;
-u32 rtc_data[12];
-u32 rtc_status = 0x40;
-u32 rtc_data_bytes;
-s32 rtc_bit_count;
-
-u32 encode_bcd(u8 value)
+static u32 encode_bcd(u8 value)
 {
   return ((value / 10) << 4) | (value % 10);
 }
 
-#define write_rtc_register(index, _value)                                     \
-  update_address = 0x80000C4 + (index * 2);                                   \
+#define WRITE_RTC_REGISTER(index, _value)                                     \
+  update_address = 0x80000C4 + (index << 1);                                  \
   rtc_registers[index] = _value;                                              \
   rtc_page_index = update_address >> 15;                                      \
   map = memory_map_read[rtc_page_index];                                      \
@@ -1893,14 +2093,15 @@ u32 encode_bcd(u8 value)
   if(map == NULL)                                                             \
     map = load_gamepak_page(rtc_page_index & 0x3FF);                          \
                                                                               \
-  ADDRESS16(map, update_address & 0x7FFF) = _value                            \
+  ADDRESS16(map, update_address & 0x7FFF) = _value;                           \
 
-void write_rtc(u32 address, u32 value)
+CPU_ALERT_TYPE write_rtc(u32 address, u32 value)
 {
   u32 rtc_page_index;
   u32 update_address;
-  u8 *map;
+  u8 *map = NULL;
 
+  address &= 0xFF;
   value &= 0xFFFF;
 
   switch(address)
@@ -1912,31 +2113,32 @@ void write_rtc(u32 address, u32 value)
     case 0xC4:
       if(rtc_state == RTC_DISABLED)
         rtc_state = RTC_IDLE;
-      if(!(rtc_registers[0] & 0x04))
+
+      if((rtc_registers[0] & 0x04) == 0)
         value = (rtc_registers[0] & 0x02) | (value & ~0x02);
-      if(rtc_registers[2] & 0x01)
+
+      if((rtc_registers[2] & 0x01) != 0)
       {
         // To begin writing a command 1, 5 must be written to the command
         // registers.
-        if((rtc_state == RTC_IDLE) && (rtc_registers[0] == 0x01) &&
-         (value == 0x05))
+        if((rtc_state == RTC_IDLE) && (rtc_registers[0] == 0x01) && (value == 0x05))
         {
           // We're now ready to begin receiving a command.
-          write_rtc_register(0, value);
+          WRITE_RTC_REGISTER(0, value);
           rtc_state = RTC_COMMAND;
           rtc_command = 0;
           rtc_bit_count = 7;
         }
         else
         {
-          write_rtc_register(0, value);
+          WRITE_RTC_REGISTER(0, value);
           switch(rtc_state)
           {
             // Accumulate RTC command by receiving the next bit, and if we
             // have accumulated enough bits to form a complete command
             // execute it.
             case RTC_COMMAND:
-              if(rtc_registers[0] & 0x01)
+              if((rtc_registers[0] & 0x01) != 0)
               {
                 rtc_command |= ((value & 0x02) >> 1) << rtc_bit_count;
                 rtc_bit_count--;
@@ -2011,19 +2213,18 @@ void write_rtc(u32 address, u32 value)
             // for a given command. Read one bit at a time.
             case RTC_INPUT_DATA:
               // Bit 1 of parameter A must be high for input
-              if(rtc_registers[1] & 0x02)
+              if((rtc_registers[1] & 0x02) != 0)
               {
                 // Read next bit for input
-                if(!(value & 0x01))
+                if((value & 0x01) == 0)
                 {
-                  rtc_data[rtc_bit_count >> 3] |=
-                   ((value & 0x01) << (7 - (rtc_bit_count & 0x07)));
+                  rtc_data[rtc_bit_count >> 3] |= ((value & 0x01) << (7 - (rtc_bit_count & 0x07)));
                 }
                 else
                 {
                   rtc_bit_count++;
 
-                  if(rtc_bit_count == (rtc_data_bytes * 8))
+                  if((u32)rtc_bit_count == (rtc_data_bytes * 8))
                   {
                     rtc_state = RTC_IDLE;
                     switch(rtc_write_mode)
@@ -2033,6 +2234,8 @@ void write_rtc(u32 address, u32 value)
                         break;
 
                       default:
+                      case RTC_WRITE_TIME:
+                      case RTC_WRITE_TIME_FULL:
                         break;
                     }
                   }
@@ -2042,26 +2245,24 @@ void write_rtc(u32 address, u32 value)
 
             case RTC_OUTPUT_DATA:
               // Bit 1 of parameter A must be low for output
-              if(!(rtc_registers[1] & 0x02))
+              if((rtc_registers[1] & 0x02) == 0)
               {
                 // Write next bit to output, on bit 1 of parameter B
-                if(!(value & 0x01))
+                if((value & 0x01) == 0)
                 {
                   u8 current_output_byte = rtc_registers[2];
 
                   current_output_byte =
                    (current_output_byte & ~0x02) |
-                   (((rtc_data[rtc_bit_count >> 3] >>
-                   (rtc_bit_count & 0x07)) & 0x01) << 1);
+                   (((rtc_data[rtc_bit_count >> 3] >> (rtc_bit_count & 0x07)) & 0x01) << 1);
 
-                  write_rtc_register(0, current_output_byte);
-
+                  WRITE_RTC_REGISTER(0, current_output_byte);
                 }
                 else
                 {
                   rtc_bit_count++;
 
-                  if(rtc_bit_count == (rtc_data_bytes * 8))
+                  if((u32)rtc_bit_count == (rtc_data_bytes * 8))
                   {
                     rtc_state = RTC_IDLE;
                     memset(rtc_registers, 0, sizeof(rtc_registers));
@@ -2071,114 +2272,49 @@ void write_rtc(u32 address, u32 value)
               break;
 
             default:
-              ;
+            case RTC_DISABLED:
+            case RTC_IDLE:
               break;
           }
         }
       }
       else
       {
-        write_rtc_register(2, value);
+        WRITE_RTC_REGISTER(2, value);
       }
       break;
 
     // Write parameter A
     case 0xC6:
-      write_rtc_register(1, value);
+      WRITE_RTC_REGISTER(1, value);
       break;
 
     // Write parameter B
     case 0xC8:
-      write_rtc_register(2, value);
+      WRITE_RTC_REGISTER(2, value);
       break;
   }
+
+  return CPU_ALERT_NONE;
 }
 
-#define write_rtc8()                                                          \
-
-#define write_rtc16()                                                         \
-  write_rtc(address & 0xFF, value)                                            \
-
-#define write_rtc32()                                                         \
-
-// type = 8 / 16 / 32
-#define write_memory(type)                                                    \
-  switch(address >> 24)                                                       \
-  {                                                                           \
-    case 0x02:                                                                \
-      /* external work RAM */                                                 \
-      ADDRESS##type(ewram_data, address & 0x3FFFF) = value;                   \
-      break;                                                                  \
-                                                                              \
-    case 0x03:                                                                \
-      /* internal work RAM */                                                 \
-      ADDRESS##type(iwram_data, address & 0x7FFF) = value;                    \
-      break;                                                                  \
-                                                                              \
-    case 0x04:                                                                \
-      /* I/O registers */                                                     \
-      if(address < 0x04000400)                                                \
-        return write_io_register##type(address & 0x3FF, value);                 /* IOは0x803まで存在 */ \
-      break;                                                                    /* 0x800は0x800ごとにループしている:TODO */ \
-                                                                              \
-    case 0x05:                                                                \
-      /* palette RAM */                                                       \
-      write_palette##type(address & 0x3FF, value);                            \
-      break;                                                                  \
-                                                                              \
-    case 0x06:                                                                \
-      /* VRAM */                                                              \
-      write_vram##type();                                                     \
-      break;                                                                  \
-                                                                              \
-    case 0x07:                                                                \
-      /* OAM RAM */                                                           \
-      write_oam_ram##type();                                                  \
-      break;                                                                  \
-                                                                              \
-    case 0x08:                                                                \
-      /* gamepak ROM or RTC */                                                \
-      write_rtc##type();                                                      \
-      break;                                                                  \
-                                                                              \
-    case 0x09 ... 0x0C:                                                       \
-      /* gamepak ROM space */                                                 \
-      break;                                                                  \
-                                                                              \
-    case 0x0D:                                                                \
-      write_eeprom(address, value);                                           \
-      break;                                                                  \
-                                                                              \
-    case 0x0E:                                                                \
-      write_backup##type();                                                   \
-      break;                                                                  \
-                                                                              \
-    default:                                                                  \
-      /* unwritable */                                                        \
-      break;                                                                  \
-  }                                                                           \
 
 u8 read_memory8(u32 address)
 {
-  u8 value;
-  read_memory(8);
-  return value;
+  u32 region = address >> 24;
+
+  if ((region & 0xF0) != 0)
+    return read8_open(address);
+
+  return (u8)(*mem_read8[region])(address);
 }
 
-u16 read_memory16_signed(u32 address)
+s16 read_memory16_signed(u32 address)
 {
-  u16 value;
-
-  if(address & 0x01)
-  {
+  if ((address & 0x01) != 0)
     return (s8)read_memory8(address);
-  }
-  else
-  {
-    read_memory(16);
-  }
 
-  return value;
+  return (s16)read_memory16(address);
 }
 
 // unaligned reads are actually 32bit
@@ -2186,61 +2322,542 @@ u16 read_memory16_signed(u32 address)
 u32 read_memory16(u32 address)
 {
   u32 value;
+  u32 region = address >> 24;
+  u32 rotate = address & 0x01;
 
-  if(address & 0x01)
-  {
-    address &= ~0x01;
-    read_memory(16);
-    ROR(value, value, 8);
-  }
+  if ((region & 0xF0) != 0)
+    value = read16_open(address);
   else
+    value = (*mem_read16[region])(address & ~0x01);
+
+  if (rotate != 0)
   {
-    read_memory(16);
+    ROR(value, value, 8);
   }
 
   return value;
 }
-
 
 u32 read_memory32(u32 address)
 {
   u32 value;
-  if(address & 0x03)
-  {
-    u32 rotate = (address & 0x03) * 8;
-    address &= ~0x03;
-    read_memory(32);
-    ROR(value, value, rotate);
-  }
+  u32 region = address >> 24;
+  u32 rotate = (address & 0x03) << 3;
+
+  if ((region & 0xF0) != 0)
+    value = read32_open(address);
   else
+    value = (*mem_read32[region])(address & ~0x03);
+
+  if (rotate != 0)
   {
-    read_memory(32);
+    ROR(value, value, rotate);
   }
 
   return value;
 }
 
+
+u8 read_open_memory8(u32 address)
+{
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last & 0xFF;
+
+  return (u8)(*open_read8[address >> 24])(address);
+}
+
+u16 read_open_memory16(u32 address)
+{
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last & 0xFFFF;
+
+  return (u16)(*open_read16[address >> 24])(address);
+}
+
+u32 read_open_memory32(u32 address)
+{
+  if (cpu_dma_hack != 0)
+    return cpu_dma_last;
+
+  return (*open_read32[address >> 24])(address);
+}
+
+
 CPU_ALERT_TYPE write_memory8(u32 address, u8 value)
 {
-  write_memory(8);
-  return CPU_ALERT_NONE;
+  u32 region = address >> 24;
+
+  if ((region & 0xF0) != 0)
+    return CPU_ALERT_NONE;
+
+  return (*mem_write8[region])(address, value);
 }
 
 CPU_ALERT_TYPE write_memory16(u32 address, u16 value)
 {
-  write_memory(16);
-  return CPU_ALERT_NONE;
+  u32 region = address >> 24;
+
+  if ((region & 0xF0) != 0)
+    return CPU_ALERT_NONE;
+
+  return (*mem_write16[region])(address & ~0x01, value);
 }
 
 CPU_ALERT_TYPE write_memory32(u32 address, u32 value)
 {
-  write_memory(32);
-  return CPU_ALERT_NONE;
+  u32 region = address >> 24;
+
+  if ((region & 0xF0) != 0)
+    return CPU_ALERT_NONE;
+
+  return (*mem_write32[region])(address & ~0x03, value);
 }
 
-char backup_filename[MAX_FILE];
 
-u32 load_backup()
+// 2N + 2(n-1)S + xI
+// 2I (normally), or 4I (if both source and destination are in gamepak memory area)
+
+#define COUNT_DMA_CYCLES()                                                    \
+{                                                                             \
+  u8 *ws_n = memory_waitstate[0 + length_type];                               \
+  u8 *ws_s = memory_waitstate[2 + length_type];                               \
+  u8 src_region = src_ptr >> 24;                                              \
+  u8 dest_region = dest_ptr >> 24;                                            \
+                                                                              \
+  dma_cycle_count += ws_n[src_region] + ws_n[dest_region] + 2                 \
+    + ((ws_s[src_region] + ws_s[dest_region] + 2) * (length - 1)) + 2;        \
+}                                                                             \
+
+#define DMA_TRANSFER_LOOP(type)                                               \
+  while (length--)                                                            \
+  {                                                                           \
+    read_value = (*dma_read##type[src_ptr >> 24])(src_ptr);                   \
+    src_ptr += src_increment;                                                 \
+                                                                              \
+    return_value |= (*dma_write##type[dest_ptr >> 24])(dest_ptr, read_value); \
+    dest_ptr += dest_increment;                                               \
+  }                                                                           \
+
+CPU_ALERT_TYPE dma_transfer(DmaTransferType *dma)
+{
+  u32 read_value = 0;
+  CPU_ALERT_TYPE return_value = CPU_ALERT_DMA;
+
+  DMA_LENGTH_TYPE length_type = dma->length_type;
+  u32 length = dma->length;
+
+  u32 src_ptr  = dma->source_address;
+  u32 dest_ptr = dma->dest_address;
+
+  s32 src_increment, dest_increment;
+
+  COUNT_DMA_CYCLES();
+
+  if (length_type == DMA_16BIT)
+  {
+    src_ptr  &= ~0x01;
+    dest_ptr &= ~0x01;
+
+    src_increment  = dma_addr_control[dma->source_direction];
+    dest_increment = dma_addr_control[dma->dest_direction];
+
+    DMA_TRANSFER_LOOP(16);
+
+    cpu_dma_last = read_value | (read_value << 16);
+  }
+  else
+  {
+    src_ptr  &= ~0x03;
+    dest_ptr &= ~0x03;
+
+    src_increment  = dma_addr_control[dma->source_direction] << 1;
+    dest_increment = dma_addr_control[dma->dest_direction] << 1;
+
+    DMA_TRANSFER_LOOP(32);
+
+    cpu_dma_last = read_value;
+  }
+
+
+  cpu_dma_hack = 1;
+
+  u32 offset_address = dma->dma_channel * 12;
+
+  dma->source_address = src_ptr;
+
+  if (dma->dest_direction == DMA_RELOAD)
+    dma->dest_address = ADDRESS32(io_registers, 0xB4 + offset_address);
+  else
+    dma->dest_address = dest_ptr;
+
+  if ((dma->repeat_type == DMA_REPEAT) && (dma->start_type != DMA_START_SPECIAL))
+  {
+    u32 length_max = (dma->dma_channel == 3) ? 0x10000 : 0x4000;
+    length = ADDRESS16(io_registers, 0xB8 + offset_address);
+
+    dma->length = (length == 0) ? length_max : length;
+  }
+
+  if ((dma->repeat_type == DMA_NO_REPEAT) || (dma->start_type == DMA_START_IMMEDIATELY))
+  {
+    dma->start_type = DMA_INACTIVE;
+    dma->direct_sound_channel = DMA_NO_DIRECT_SOUND;
+
+    ADDRESS16(io_registers, 0xBA + offset_address) &= 0x7FFF;
+  }
+
+  if (dma->irq != 0)
+  {
+    io_registers[REG_IF] |= (IRQ_DMA0 << dma->dma_channel);
+    return_value |= CPU_ALERT_IRQ;
+  }
+
+  return return_value;
+}
+
+
+// Be sure to do this after loading ROMs.
+
+#define MAP_REGION(type, start, end, mirror_blocks, region)                   \
+  for(map_offset = (start) / 0x8000; map_offset < ((end) / 0x8000);           \
+   map_offset++)                                                              \
+  {                                                                           \
+    memory_map_##type[map_offset] =                                           \
+     ((u8 *)region) + ((map_offset % mirror_blocks) * 0x8000);                \
+  }                                                                           \
+
+#define MAP_NULL(type, start, end)                                            \
+  for(map_offset = (start) / 0x8000; map_offset < ((end) / 0x8000);           \
+   map_offset++)                                                              \
+  {                                                                           \
+    memory_map_##type[map_offset] = NULL;                                     \
+  }                                                                           \
+
+#define MAP_VRAM(type)                                                        \
+  for(map_offset = 0x6000000 / 0x8000; map_offset < (0x7000000 / 0x8000);     \
+   map_offset += 4)                                                           \
+  {                                                                           \
+    memory_map_##type[map_offset] = vram;                                     \
+    memory_map_##type[map_offset + 1] = vram + 0x8000;                        \
+    memory_map_##type[map_offset + 2] = vram + (0x8000 * 2);                  \
+    memory_map_##type[map_offset + 3] = vram + (0x8000 * 2);                  \
+  }                                                                           \
+
+
+static u32 evict_gamepak_page(void)
+{
+	// We will evict the page with index gamepak_next_swap, a bit like a ring
+	// buffer.
+	u32 page_index = gamepak_next_swap;
+	gamepak_next_swap++;
+	if (gamepak_next_swap >= gamepak_ram_pages)
+		gamepak_next_swap = 0;
+	u16 physical_index = gamepak_memory_map[page_index];
+
+	memory_map_read[(0x8000000 / (32 * 1024)) + physical_index] = NULL;
+	memory_map_read[(0xA000000 / (32 * 1024)) + physical_index] = NULL;
+	memory_map_read[(0xC000000 / (32 * 1024)) + physical_index] = NULL;
+
+#if TRACE_MEMORY
+	ReGBA_Trace("T: Evicting virtual page %u", page_index);
+#endif
+	
+	return page_index;
+}
+
+u8 *load_gamepak_page(u16 physical_index)
+{
+	if (memory_map_read[(0x08000000 / (32 * 1024)) + (uint32_t) physical_index] != NULL)
+	{
+#if TRACE_MEMORY
+		ReGBA_Trace("T: Not reloading already loaded Game Pak page %u (%08X..%08X)", (uint32_t) physical_index, 0x08000000 + physical_index * (32 * 1024), 0x08000000 + (uint32_t) physical_index * (32 * 1024) + 0x7FFF);
+#endif
+		return memory_map_read[(0x08000000 / (32 * 1024)) + (uint32_t) physical_index];
+	}
+#if TRACE_MEMORY
+	ReGBA_Trace("T: Loading Game Pak page %u (%08X..%08X)", (uint32_t) physical_index, 0x08000000 + (uint32_t) physical_index * (32 * 1024), 0x08000000 + (uint32_t) physical_index * (32 * 1024) + 0x7FFF);
+#endif
+	if((uint32_t) physical_index >= (gamepak_size >> 15))
+		return gamepak_rom;
+
+	u16 page_index = evict_gamepak_page();
+	u32 page_offset = (uint32_t) page_index * (32 * 1024);
+	u8 *swap_location = gamepak_rom + page_offset;
+
+	gamepak_memory_map[page_index] = physical_index;
+
+	FILE_SEEK(gamepak_file_large, (off_t) physical_index * (32 * 1024), SEEK_SET);
+	FILE_READ(gamepak_file_large, swap_location, (32 * 1024));
+
+	memory_map_read[(0x8000000 / (32 * 1024)) + physical_index] =
+		memory_map_read[(0xA000000 / (32 * 1024)) + physical_index] =
+		memory_map_read[(0xC000000 / (32 * 1024)) + physical_index] = swap_location;
+
+	// If RTC is active page the RTC register bytes so they can be read
+	if((rtc_state != RTC_DISABLED) && (physical_index == 0))
+	{
+		memcpy(swap_location + 0xC4, rtc_registers, sizeof(rtc_registers));
+	}
+
+	return swap_location;
+}
+
+static void init_memory_gamepak(void)
+{
+  u32 map_offset = 0;
+
+  if (FILE_CHECK_VALID(gamepak_file_large))
+  {
+    // Large ROMs get special treatment because they
+    // can't fit into the ROM buffer.
+    // The size of this buffer varies per platform, and may actually
+    // fit all of the ROM, in which case this is dead code.
+    memset(gamepak_memory_map, 0, sizeof(gamepak_memory_map));
+    gamepak_next_swap = 0;
+
+    MAP_NULL(read, 0x8000000, 0xE000000);
+  }
+  else
+  {
+    MAP_REGION(read, 0x8000000, 0x8000000 + gamepak_size, 1024, gamepak_rom);
+    MAP_NULL(read, 0x8000000 + gamepak_size, 0xA000000);
+    MAP_REGION(read, 0xA000000, 0xA000000 + gamepak_size, 1024, gamepak_rom);
+    MAP_NULL(read, 0xA000000 + gamepak_size, 0xC000000);
+    MAP_REGION(read, 0xC000000, 0xC000000 + gamepak_size, 1024, gamepak_rom);
+    MAP_NULL(read, 0xC000000 + gamepak_size, 0xE000000);
+  }
+}
+
+void init_memory(void)
+{
+  u32 map_offset = 0;
+
+  // Fill memory map regions, areas marked as NULL must be checked directly
+  MAP_REGION(read, 0x0000000, 0x1000000, 1, bios.rom);
+  MAP_NULL(read, 0x1000000, 0x2000000);
+  MAP_REGION(read, 0x2000000, 0x3000000, 8, ewram_data);
+  MAP_REGION(read, 0x3000000, 0x4000000, 1, iwram_data);
+  MAP_NULL(read, 0x4000000, 0x5000000);
+  MAP_NULL(read, 0x5000000, 0x6000000);
+  MAP_VRAM(read);
+  MAP_NULL(read, 0x7000000, 0x8000000);
+  init_memory_gamepak();
+  MAP_NULL(read, 0xE000000, 0x10000000);
+
+  // Fill memory map regions, areas marked as NULL must be checked directly
+  MAP_NULL(write, 0x0000000, 0x2000000);
+  MAP_REGION(write, 0x2000000, 0x3000000, 8, ewram_data);
+  MAP_REGION(write, 0x3000000, 0x4000000, 1, iwram_data);
+  MAP_NULL(write, 0x4000000, 0x5000000);
+  MAP_NULL(write, 0x5000000, 0x6000000);
+  MAP_VRAM(write);
+  MAP_NULL(write, 0x7000000, 0x8000000);
+  MAP_NULL(write, 0x8000000, 0xE000000);
+  MAP_NULL(write, 0xE000000, 0x10000000);
+
+  memset(iwram_data, 0, sizeof(iwram_data));
+  memset(ewram_data, 0, sizeof(ewram_data));
+  memset(vram, 0, sizeof(vram));
+
+  memset(io_registers, 0, sizeof(io_registers));
+  memset(oam_ram, 0, sizeof(oam_ram));
+  memset(palette_ram, 0, sizeof(palette_ram));
+
+  io_registers[REG_DISPCNT]   = 0x0080;
+  io_registers[REG_DISPSTAT]  = 0x0000;
+  io_registers[REG_VCOUNT]    = gpsp_persistent_config.BootFromBIOS ? 0x0000 : 0x007e;
+  io_registers[REG_P1]        = 0x03FF;
+  io_registers[REG_BG2PA]     = 0x0100;
+  io_registers[REG_BG2PD]     = 0x0100;
+  io_registers[REG_BG3PA]     = 0x0100;
+  io_registers[REG_BG3PD]     = 0x0100;
+  io_registers[REG_SOUNDBIAS] = 0x0200;
+
+  io_registers[REG_RCNT]  = 0x800F;
+  sio_control(0x0004);
+
+  waitstate_control(0x0000);
+
+  oam_update = 1;
+
+  affine_reference_x[0] = 0;
+  affine_reference_x[1] = 0;
+  affine_reference_y[0] = 0;
+  affine_reference_y[1] = 0;
+
+  flash_mode = FLASH_BASE_MODE;
+  flash_bank_offset = 0;
+  flash_command_position = 0;
+
+  eeprom_mode = EEPROM_BASE_MODE;
+  eeprom_address = 0;
+  eeprom_counter = 0;
+
+  rtc_state = RTC_DISABLED;
+  rtc_status = 0x40;
+  memset(rtc_registers, 0, sizeof(rtc_registers));
+
+  bios_read_protect = 0xe129f000;
+
+  cpu_dma_hack = 0;
+  cpu_dma_last = 0;
+
+  read_rom_region = 0xFFFFFFFF;
+  read_ram_region = 0xFFFFFFFF;
+}
+
+static void load_backup_id(void)
+{
+  u32 addr;
+
+  u8 *block = NULL;
+  u32 *data = NULL;
+
+  u32 region = 0xFFFFFFFF;
+  u32 new_region = 0;
+
+  init_memory_gamepak();
+
+  u32 find_id = 0;
+  BACKUP_TYPE_TYPE backup_type_id[2] = { BACKUP_NONE, };
+
+  backup_type = BACKUP_NONE;
+
+  sram_size   = SRAM_SIZE_32KB;
+  flash_size  = FLASH_SIZE_64KB;
+  eeprom_size = EEPROM_512_BYTE;
+
+  backup_id[0] = 0;
+
+  for (addr = 0x08000000; addr < 0x08000000 + gamepak_size; addr += 4)
+  {
+    new_region = addr >> 15;
+
+    if (new_region != region)
+    {
+      region = new_region;
+      block = memory_map_read[region];
+
+      if (block == NULL)
+        block = load_gamepak_page(region & 0x3FF);
+    }
+
+    data = (u32 *)(block + (addr & 0x7FFC));
+
+    switch (data[0])
+    {
+      case ('E' | ('E' << 8) | ('P' << 16) | ('R' << 24)):
+      {
+        // EEPROM_Vxxx : EEPROM 512 bytes or 8 Kbytes (4Kbit or 64Kbit)
+        if (memcmp(data, "EEPROM_V", 8) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_EEPROM;
+          find_id++;
+
+          memcpy(backup_id, data, 11);
+          backup_id[11] = 0;
+        }
+      }
+      break;
+
+      case ('S' | ('R' << 8) | ('A' << 16) | ('M' << 24)):
+      {
+        // SRAM_Vxxx : SRAM 32 Kbytes (256Kbit)
+        if (memcmp(data, "SRAM_V", 6) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_SRAM;
+          find_id++;
+
+          memcpy(backup_id, data, 9);
+          backup_id[9] = 0;
+        }
+
+        // SRAM_F_Vxxx : FRAM 32 Kbytes (256Kbit)
+        if (memcmp(data, "SRAM_F", 6) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_SRAM;
+          find_id++;
+
+          memcpy(backup_id, data, 11);
+          backup_id[11] = 0;
+        }
+      }
+      break;
+
+      case ('F' | ('L' << 8) | ('A' << 16) | ('S' << 24)):
+      {
+        // FLASH_Vxxx : FLASH 64 Kbytes (512Kbit) (ID used in older files)
+        if (memcmp(data, "FLASH_V", 7) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_FLASH;
+          find_id++;
+
+          flash_size  = FLASH_SIZE_64KB;
+          flash_device_id = FLASH_DEVICE_PANASONIC_64KB;
+          flash_manufacturer_id = FLASH_MANUFACTURER_PANASONIC;
+
+          memcpy(backup_id, data, 10);
+          backup_id[10] = 0;
+        }
+
+        // FLASH512_Vxxx : FLASH 64 Kbytes (512Kbit) (ID used in newer files)
+        if (memcmp(data, "FLASH512", 8) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_FLASH;
+          find_id++;
+
+          flash_size  = FLASH_SIZE_64KB;
+          flash_device_id = FLASH_DEVICE_PANASONIC_64KB;
+          flash_manufacturer_id = FLASH_MANUFACTURER_PANASONIC;
+
+          memcpy(backup_id, data, 13);
+          backup_id[13] = 0;
+        }
+
+        // FLASH1M_Vxxx : FLASH 128 Kbytes (1Mbit)
+        if (memcmp(data, "FLASH1M_", 8) == 0)
+        {
+          backup_type_id[find_id] = BACKUP_FLASH;
+          find_id++;
+
+          flash_size  = FLASH_SIZE_128KB;
+          flash_device_id = FLASH_DEVICE_SANYO_128KB;
+          flash_manufacturer_id = FLASH_MANUFACTURER_SANYO;
+
+          memcpy(backup_id, data, 12);
+          backup_id[12] = 0;
+        }
+      }
+      break;
+    }
+
+    if (find_id > 1) break;
+  }
+
+  if (find_id > 1)
+  {
+    // backup_id same
+    if (backup_type_id[0] == backup_type_id[1])
+    {
+      backup_type = backup_type_id[0];
+      return;
+    }
+
+    // backup_id different
+    backup_type = BACKUP_NONE;
+
+    flash_size  = FLASH_SIZE_64KB;
+    flash_device_id = FLASH_DEVICE_PANASONIC_64KB;
+    flash_manufacturer_id = FLASH_MANUFACTURER_PANASONIC;
+
+    backup_id[0] = 0;
+    return;
+  }
+
+  backup_type = backup_type_id[0];
+}
+
+u32 load_backup(void)
 {
 	char BackupFilename[MAX_PATH + 1];
 	if (!ReGBA_GetBackupFilename(BackupFilename, CurrentGamePath))
@@ -2263,48 +2880,68 @@ u32 load_backup()
 	ReGBA_ProgressUpdate(1, 1);
 	ReGBA_ProgressFinalise();
 
-    // The size might give away what kind of backup it is.
-    switch(backup_size)
+    if (backup_type != BACKUP_NONE)
     {
-      case 0x200:
-        backup_type = BACKUP_EEPROM;
-        eeprom_size = EEPROM_512_BYTE;
-        break;
+      switch (backup_size)
+      {
+        case 0x200:
+          eeprom_size = EEPROM_512_BYTE;
+          break;
 
-      case 0x2000:
-        backup_type = BACKUP_EEPROM;
-        eeprom_size = EEPROM_8_KBYTE;
-        break;
-
-      case 0x8000:
-        backup_type = BACKUP_SRAM;
-        sram_size = SRAM_SIZE_32KB;
-        break;
-
-      // Could be either flash or SRAM, go with flash
-      case 0x10000:
-        backup_type = BACKUP_FLASH;
-        sram_size = FLASH_SIZE_64KB;
-        break;
-
-      case 0x20000:
-        backup_type = BACKUP_FLASH;
-        flash_size = FLASH_SIZE_128KB;
-        break;
+        case 0x2000:
+          eeprom_size = EEPROM_8_KBYTE;
+          break;
+      }
     }
+    else
+    {
+      // The size might give away what kind of backup it is.
+      switch(backup_size)
+      {
+        case 0x200:
+          backup_type = BACKUP_EEPROM;
+          eeprom_size = EEPROM_512_BYTE;
+          break;
+
+        case 0x2000:
+          backup_type = BACKUP_EEPROM;
+          eeprom_size = EEPROM_8_KBYTE;
+          break;
+
+        case 0x8000:
+          backup_type = BACKUP_SRAM;
+          sram_size = SRAM_SIZE_32KB;
+          break;
+
+        // Could be either flash or SRAM, go with flash
+        case 0x10000:
+          sram_size  = SRAM_SIZE_64KB;
+          flash_size = FLASH_SIZE_64KB;
+          flash_device_id = FLASH_DEVICE_PANASONIC_64KB;
+          flash_manufacturer_id = FLASH_MANUFACTURER_PANASONIC;
+          break;
+
+        case 0x20000:
+          backup_type = BACKUP_FLASH;
+          flash_size  = FLASH_SIZE_128KB;
+          flash_device_id = FLASH_DEVICE_SANYO_128KB;
+          flash_manufacturer_id = FLASH_MANUFACTURER_SANYO;
+          break;
+      }
+    }
+
     return 1;
   }
   else
   {
 	ReGBA_ProgressFinalise();
-    backup_type = BACKUP_NONE;
     memset(gamepak_backup, 0xFF, 1024 * 128);
   }
 
   return 0;
 }
 
-u32 save_backup()
+static u32 save_backup(void)
 {
 	char BackupFilename[MAX_PATH + 1];
 	if (!ReGBA_GetBackupFilename(BackupFilename, CurrentGamePath))
@@ -2315,39 +2952,32 @@ u32 save_backup()
 
   FILE_TAG_TYPE backup_file;
 
-  if(backup_type != BACKUP_NONE)
+  if (backup_type != BACKUP_NONE)
   {
-	ReGBA_ProgressInitialise(FILE_ACTION_SAVE_BATTERY);
+    ReGBA_ProgressInitialise(FILE_ACTION_SAVE_BATTERY);
     FILE_OPEN(backup_file, BackupFilename, WRITE);
 
-    if(FILE_CHECK_VALID(backup_file))
+    if (FILE_CHECK_VALID(backup_file))
     {
-      u32 backup_size = 0x8000;
+      u32 backup_size;
 
       switch(backup_type)
       {
         case BACKUP_SRAM:
-          if(sram_size == SRAM_SIZE_32KB)
-            backup_size = 0x8000;
-          else
-            backup_size = 0x10000;
+          backup_size = sram_size;
           break;
 
         case BACKUP_FLASH:
-          if(flash_size == FLASH_SIZE_64KB)
-            backup_size = 0x10000;
-          else
-            backup_size = 0x20000;
+          backup_size = flash_size;
           break;
 
         case BACKUP_EEPROM:
-          if(eeprom_size == EEPROM_512_BYTE)
-            backup_size = 0x200;
-          else
-            backup_size = 0x2000;
+          backup_size = eeprom_size;
           break;
 
         default:
+        case BACKUP_NONE:
+          backup_size = 0x8000;
           break;
       }
 
@@ -2362,25 +2992,29 @@ u32 save_backup()
   return 0;
 }
 
-void update_backup()
+void update_backup(void)
 {
-  if(backup_update != (write_backup_delay + 1))
+  if(backup_update != (WRITE_BACKUP_DELAY + 1))
     backup_update--;
 
   if(backup_update == 0)
   {
     save_backup();
-    backup_update = write_backup_delay + 1;
+    backup_update = WRITE_BACKUP_DELAY + 1;
   }
 }
 
-void update_backup_force()
+void update_backup_force(void)
 {
-  save_backup();
-  backup_update = write_backup_delay + 1;
+  if (backup_update != (WRITE_BACKUP_DELAY + 1))
+  {
+    save_backup();
+    backup_update = WRITE_BACKUP_DELAY + 1;
+  }
 }
 
-char *skip_spaces(char *line_ptr)
+
+static char *skip_spaces(char *line_ptr)
 {
   while(*line_ptr == ' ')
     line_ptr++;
@@ -2388,7 +3022,7 @@ char *skip_spaces(char *line_ptr)
   return line_ptr;
 }
 
-s32 parse_config_line(char *current_line, char *current_variable, char *current_value)
+static s32 parse_config_line(char *current_line, char *current_variable, char *current_value)
 {
   char *line_ptr = current_line;
   char *line_ptr_new;
@@ -2422,23 +3056,23 @@ s32 parse_config_line(char *current_line, char *current_variable, char *current_
   return 0;
 }
 
-static bool lookup_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker, FILE_TAG_TYPE config_file);
-
-s32 load_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker)
+static s32 load_game_config(char *gamepak_title, char *gamepak_code, char *gamepak_maker)
 {
 	char config_path[MAX_PATH];
 	FILE_TAG_TYPE config_file;
+	u32 i;
 
 	idle_loop_targets = 0;
-	idle_loop_target_pc[0] = 0xFFFFFFFF;
+	for (i = 0; i < MAX_IDLE_LOOPS; i++)
+		idle_loop_target_pc[i] = 0xFFFFFFFF;
+
 	iwram_stack_optimize = 1;
+
 	if (IsNintendoBIOS)
 	{
 		bios.rom[0x39] = 0x00; // Only Nintendo's BIOS requires this.
 		bios.rom[0x2C] = 0x00; // Normmatt's open-source replacement doesn't.
 	}
-	flash_device_id = FLASH_DEVICE_MACRONIX_64KB;
-	backup_type = BACKUP_NONE;
 
 	ReGBA_ProgressInitialise(FILE_ACTION_APPLY_GAME_COMPATIBILITY);
 
@@ -2523,23 +3157,6 @@ static bool lookup_game_config(char *gamepak_title, char *gamepak_code, char *ga
 					if(!strcasecmp(current_variable, "iwram_stack_optimize") && !strcasecmp(current_value, "no"))
 					{
 						iwram_stack_optimize = 0;
-					}
-
-					if(!strcasecmp(current_variable, "flash_rom_type") && !strcasecmp(current_value, "128KB"))
-					{
-						flash_device_id = FLASH_DEVICE_MACRONIX_128KB;
-					}
-
-					// DBZLGCYGOKU2 のプロテクト回避
-					// EEPROM_V124で特殊な物(現在判別不可) で指定すれば動作可
-					if(!strcasecmp(current_variable, "save_type"))
-					{
-						if(!strcasecmp(current_value, "sram"))
-							backup_type = BACKUP_SRAM;
-						else if(!strcasecmp(current_value, "flash"))
-							backup_type = BACKUP_FLASH;
-						else if(!strcasecmp(current_value, "eeprom"))
-							backup_type = BACKUP_EEPROM;
 					}
 
 					if(!strcasecmp(current_variable, "bios_rom_hack_39") &&
@@ -2684,8 +3301,6 @@ ssize_t load_gamepak(char *file_path)
 
 		gamepak_size = (file_size + 0x7FFF) & ~0x7FFF;
 
-		load_backup();
-
 		memcpy(gamepak_title, gamepak_rom + 0xA0, 12);
 		memcpy(gamepak_code, gamepak_rom + 0xAC, 4);
 		memcpy(gamepak_maker, gamepak_rom + 0xB0, 2);
@@ -2693,9 +3308,10 @@ ssize_t load_gamepak(char *file_path)
 		gamepak_code[4] = '\0';
 		gamepak_maker[2] = '\0';
 
-		mem_save_flag = 0;
-
 		load_game_config(gamepak_title, gamepak_code, gamepak_maker);
+
+		load_backup_id();
+		load_backup();
 
 		reset_gba();
 		reg[CHANGED_PC_STATUS] = 1;
@@ -2708,26 +3324,24 @@ ssize_t load_gamepak(char *file_path)
 	return -1;
 }
 
-uint8_t nintendo_bios_sha1[] = {
-	0x30, 0x0c, 0x20, 0xdf, 0x67, 0x31, 0xa3, 0x39, 0x52, 0xde,
-	0xd8, 0xc4, 0x36, 0xf7, 0xf1, 0x86, 0xd2, 0x5d, 0x34, 0x92,
-};
-
 s32 load_bios(char *name)
 {
 	FILE_TAG_TYPE bios_file;
 	FILE_OPEN(bios_file, name, READ);
 
-	if(FILE_CHECK_VALID(bios_file))
+	if (FILE_CHECK_VALID(bios_file))
 	{
 		FILE_READ(bios_file, bios.rom, 0x4000);
 		FILE_CLOSE(bios_file);
 
-		sha1nfo sha1;
-		sha1_init(&sha1);
-		sha1_write(&sha1, bios.rom, 0x4000);
-		uint8_t* digest = sha1_result(&sha1);
-		IsNintendoBIOS = memcmp(digest, nintendo_bios_sha1, SHA1_HASH_LENGTH) == 0;
+		IsNintendoBIOS = false;
+		u32 bios_crc = crc32(0, bios.rom, 0x4000);
+
+		if (bios_crc == 0x81977335) // GBA
+			IsNintendoBIOS = true;
+
+		if (bios_crc == 0xa6473709) // NDS
+			IsNintendoBIOS = true;
 
 		return 0;
 	}
@@ -2735,1033 +3349,6 @@ s32 load_bios(char *name)
 	return -1;
 }
 
-// DMA memory regions can be one of the following:
-// IWRAM - 32kb offset from the contiguous iwram region.
-// EWRAM - like segmented but with self modifying code check.
-// VRAM - 96kb offset from the contiguous vram region, should take care
-// Palette RAM - Converts palette entries when written to.
-// OAM RAM - Sets OAM modified flag to true.
-// I/O registers - Uses the I/O register function.
-// of mirroring properly.
-// Segmented RAM/ROM - a region >= 32kb, the translated address has to
-//  be reloaded if it wraps around the limit (cartride ROM)
-// Ext - should be handled by the memory read/write function.
-
-// The following map determines the region of each (assumes DMA access
-// is not done out of bounds)
-
-typedef enum
-{
-  DMA_REGION_IWRAM,
-  DMA_REGION_EWRAM,
-  DMA_REGION_VRAM,
-  DMA_REGION_PALETTE_RAM,
-  DMA_REGION_OAM_RAM,
-  DMA_REGION_IO,
-  DMA_REGION_GAMEPAK,
-  DMA_REGION_EXT,
-  DMA_REGION_BIOS,
-  DMA_REGION_NULL
-} dma_region_type;
-
-dma_region_type dma_region_map[16] =
-{
-  DMA_REGION_BIOS,          // 0x00 - BIOS
-  DMA_REGION_NULL,          // 0x01 - Nothing
-  DMA_REGION_EWRAM,         // 0x02 - EWRAM
-  DMA_REGION_IWRAM,         // 0x03 - IWRAM
-  DMA_REGION_IO,            // 0x04 - I/O registers
-  DMA_REGION_PALETTE_RAM,   // 0x05 - palette RAM
-  DMA_REGION_VRAM,          // 0x06 - VRAM
-  DMA_REGION_OAM_RAM,       // 0x07 - OAM RAM
-  DMA_REGION_GAMEPAK,       // 0x08 - gamepak ROM
-  DMA_REGION_GAMEPAK,       // 0x09 - gamepak ROM
-  DMA_REGION_GAMEPAK,       // 0x0A - gamepak ROM
-  DMA_REGION_GAMEPAK,       // 0x0B - gamepak ROM
-  DMA_REGION_GAMEPAK,       // 0x0C - gamepak ROM
-  DMA_REGION_EXT,           // 0x0D - EEPROM
-  DMA_REGION_EXT,           // 0x0E - gamepak SRAM/flash ROM
-  DMA_REGION_EXT            // 0x0F - gamepak SRAM/flash ROM
-};
-
-static void dma_adjust_ptr_inc(uint32_t* GBAAddress, uint_fast8_t TransferBytes)
-{
-	*GBAAddress += TransferBytes;
-}
-
-static void dma_adjust_ptr_dec(uint32_t* GBAAddress, uint_fast8_t TransferBytes)
-{
-	*GBAAddress -= TransferBytes;
-}
-
-static void dma_adjust_ptr_fix(uint32_t* GBAAddress, uint_fast8_t TransferBytes)
-{
-}
-
-static void dma_adjust_reg_writeback(DMA_TRANSFER_TYPE* DMA, uint32_t GBAAddress)
-{
-	DMA->dest_address = GBAAddress;
-}
-
-static void dma_adjust_reg_reload(DMA_TRANSFER_TYPE* DMA, uint32_t GBAAddress)
-{
-}
-
-#define dma_smc_vars_src()                                                    \
-
-#define dma_smc_vars_dest()                                                   \
-  u32 smc_trigger = 0                                                         \
-
-#define dma_vars_iwram(type)                                                  \
-  dma_smc_vars_##type()                                                       \
-
-#define dma_vars_vram(type)                                                   \
-  dma_smc_vars_##type();                                                      \
-
-#define dma_vars_palette_ram(type)                                            \
-
-#define dma_oam_ram_src()                                                     \
-
-#define dma_oam_ram_dest()                                                    \
-  oam_update = 1                                                              \
-
-#define dma_vars_oam_ram(type)                                                \
-  dma_oam_ram_##type()                                                        \
-
-#define dma_vars_io(type)                                                     \
-
-#define dma_segmented_load_src()                                              \
-  memory_map_read[src_current_region]                                         \
-
-#define dma_segmented_load_dest()                                             \
-  memory_map_write[dest_current_region]                                       \
-
-#define dma_vars_gamepak(type)                                                \
-  u32 type##_new_region;                                                      \
-  u32 type##_current_region = type##_ptr >> 15;                               \
-  u8 *type##_address_block = dma_segmented_load_##type();                     \
-  if(type##_address_block == NULL)                                            \
-  {                                                                           \
-    if((type##_ptr & 0x1FFFFFF) >= gamepak_size)                              \
-      return return_value;                                                    \
-    type##_address_block = load_gamepak_page(type##_current_region & 0x3FF);  \
-  }                                                                           \
-
-#define dma_vars_ewram(type)                                                  \
-  dma_smc_vars_##type();                                                      \
-
-#define dma_vars_bios(type)                                                   \
-
-#define dma_vars_ext(type)                                                    \
-
-#define dma_gamepak_check_region(type)                                        \
-  type##_new_region = (type##_ptr >> 15);                                     \
-  if(type##_new_region != type##_current_region)                              \
-  {                                                                           \
-    type##_current_region = type##_new_region;                                \
-    type##_address_block = dma_segmented_load_##type();                       \
-    if(type##_address_block == NULL)                                          \
-    {                                                                         \
-      type##_address_block =                                                  \
-       load_gamepak_page(type##_current_region & 0x3FF);                      \
-    }                                                                         \
-  }                                                                           \
-
-#define dma_read_iwram(type, transfer_size)                                   \
-  read_value = ADDRESS##transfer_size(iwram_data, type##_ptr & 0x7FFF)        \
-
-#define dma_read_vram(type, transfer_size)                                    \
-  if (type##_ptr & 0x10000)                                                   \
-    read_value = ADDRESS##transfer_size(vram, type##_ptr & 0x17FFF);          \
-  else                                                                        \
-    read_value = ADDRESS##transfer_size(vram, type##_ptr & 0xFFFF)            \
-
-#define dma_read_io(type, transfer_size)                                      \
-  read_value = ADDRESS##transfer_size(io_registers, type##_ptr & 0x7FFF)      \
-
-#define dma_read_oam_ram(type, transfer_size)                                 \
-  read_value = ADDRESS##transfer_size(oam_ram, type##_ptr & 0x3FF)            \
-
-#define dma_read_palette_ram(type, transfer_size)                             \
-  read_value = ADDRESS##transfer_size(palette_ram, type##_ptr & 0x3FF)        \
-
-#define dma_read_ewram(type, transfer_size)                                   \
-  read_value = ADDRESS##transfer_size(ewram_data, type##_ptr & 0x3FFFF)       \
-
-#define dma_read_gamepak(type, transfer_size)                                 \
-  dma_gamepak_check_region(type);                                             \
-  read_value = ADDRESS##transfer_size(type##_address_block,                   \
-   type##_ptr & 0x7FFF)                                                       \
-
-// DMAing from the BIOS is funny, just returns 0..
-
-#define dma_read_bios(type, transfer_size)                                    \
-  read_value = 0                                                              \
-
-#define dma_read_ext(type, transfer_size)                                     \
-  read_value = read_memory##transfer_size(type##_ptr)                         \
-
-#define dma_write_iwram(type, transfer_size)                                  \
-  ADDRESS##transfer_size(iwram_data, type##_ptr & 0x7FFF) = read_value;       \
-  {                                                                           \
-    /* Get the Metadata Entry's [3], bits 0-1, to see if there's code at this \
-     * location. See "doc/partial flushing of RAM code.txt" for more info. */ \
-    u16 smc = iwram_metadata[(type##_ptr & 0x7FFC) | 3] & 0x3;                \
-    if (smc) {                                                                \
-      partial_clear_metadata(type##_ptr);                                     \
-    }                                                                         \
-    smc_trigger |= smc;                                                       \
-  }                                                                           \
-
-#define dma_write_vram(type, transfer_size)                                   \
-  if (type##_ptr & 0x10000)                                                   \
-    ADDRESS##transfer_size(vram, type##_ptr & 0x17FFF) = read_value;          \
-  else                                                                        \
-    ADDRESS##transfer_size(vram, type##_ptr & 0xFFFF) = read_value;           \
-  {                                                                           \
-    /* Get the Metadata Entry's [3], bits 0-1, to see if there's code at this \
-     * location. See "doc/partial flushing of RAM code.txt" for more info. */ \
-    u16 smc;                                                                  \
-    if (type##_ptr & 0x10000)                                                 \
-      smc = vram_metadata[(type##_ptr & 0x17FFC) | 3] & 0x3;                  \
-    else                                                                      \
-      smc = vram_metadata[(type##_ptr & 0xFFFC) | 3] & 0x3;                   \
-    if (smc) {                                                                \
-      partial_clear_metadata(type##_ptr);                                     \
-    }                                                                         \
-    smc_trigger |= smc;                                                       \
-  }                                                                           \
-
-#define dma_write_io(type, transfer_size)                                     \
-  write_io_register##transfer_size(type##_ptr & 0x3FF, read_value)            \
-
-#define dma_write_oam_ram(type, transfer_size)                                \
-  ADDRESS##transfer_size(oam_ram, type##_ptr & 0x3FF) = read_value            \
-
-#define dma_write_palette_ram(type, transfer_size)                            \
-  write_palette##transfer_size(type##_ptr & 0x3FF, read_value)                \
-
-#define dma_write_ext(type, transfer_size)                                    \
-  write_memory##transfer_size(type##_ptr, read_value)                         \
-
-#define dma_write_ewram(type, transfer_size)                                  \
-  ADDRESS##transfer_size(ewram_data, type##_ptr & 0x3FFFF) = read_value;      \
-  {                                                                           \
-    /* Get the Metadata Entry's [3], bits 0-1, to see if there's code at this \
-     * location. See "doc/partial flushing of RAM code.txt" for more info. */ \
-    u16 smc = ewram_metadata[(type##_ptr & 0x3FFFC) | 3] & 0x3;               \
-    if (smc) {                                                                \
-      partial_clear_metadata(type##_ptr);                                     \
-    }                                                                         \
-    smc_trigger |= smc;                                                       \
-  }                                                                           \
-
-#define dma_epilogue_iwram()                                                  \
-  if(smc_trigger)                                                             \
-  {                                                                           \
-    /* Special return code indicating to retranslate to the CPU code */       \
-    return_value |= CPU_ALERT_SMC;                                             \
-  }                                                                           \
-
-#define dma_epilogue_ewram()                                                  \
-  if(smc_trigger)                                                             \
-  {                                                                           \
-    /* Special return code indicating to retranslate to the CPU code */       \
-    return_value |= CPU_ALERT_SMC;                                             \
-  }                                                                           \
-
-#define dma_epilogue_vram()                                                   \
-  if(smc_trigger)                                                             \
-  {                                                                           \
-    /* Special return code indicating to retranslate to the CPU code */       \
-    return_value |= CPU_ALERT_SMC;                                             \
-  }                                                                           \
-
-#define dma_epilogue_io()                                                     \
-
-#define dma_epilogue_oam_ram()                                                \
-
-#define dma_epilogue_palette_ram()                                            \
-
-#define dma_epilogue_GAMEPAK()                                                \
-
-#define dma_epilogue_ext()                                                    \
-
-#define print_line()                                                          \
-  dma_print(src_op, dest_op, transfer_size, wb)                               \
-  
-#define dma_transfer_loop_region(src_region_type, dest_region_type, src_op,   \
- dest_op, transfer_size, wb)                                                  \
-dma_transfer_##src_region_type##_##dest_region_type##_##transfer_size(        \
-  dma, src_ptr, dest_ptr, length, src_op, dest_op, wb);                       \
-break;                                                                        \
-
-#define dma_transfer_loop_region_builder(src_region_type, dest_region_type,   \
- transfer_size)                                                               \
-static CPU_ALERT_TYPE dma_transfer_##src_region_type##_##dest_region_type##_##transfer_size \
-(                                                                             \
-  DMA_TRANSFER_TYPE* dma,                                                     \
-  uint32_t src_ptr,                                                           \
-  uint32_t dest_ptr,                                                          \
-  uint32_t length,                                                            \
-  void (*src_op) (uint32_t*, uint_fast8_t),                                   \
-  void (*dest_op) (uint32_t*, uint_fast8_t),                                  \
-  void (*writeback_op) (DMA_TRANSFER_TYPE*, uint32_t)                         \
-)                                                                             \
-{                                                                             \
-  uint_fast##transfer_size##_t read_value;                                    \
-  uint32_t i;                                                                 \
-  CPU_ALERT_TYPE return_value = CPU_ALERT_NONE;                               \
-  dma_vars_##src_region_type(src);                                            \
-  dma_vars_##dest_region_type(dest);                                          \
-                                                                              \
-  for(i = 0; i < length; i++)                                                 \
-  {                                                                           \
-    dma_read_##src_region_type(src, transfer_size);                           \
-    dma_write_##dest_region_type(dest, transfer_size);                        \
-    src_op(&src_ptr, transfer_size / 8);                                      \
-    dest_op(&dest_ptr, transfer_size / 8);                                    \
-  }                                                                           \
-  dma->source_address = src_ptr;                                              \
-  writeback_op(dma, dest_ptr);                                                \
-  dma_epilogue_##dest_region_type();                                          \
-  return return_value;                                                        \
-}                                                                             \
-
-// To IWRAM
-dma_transfer_loop_region_builder(bios, iwram, 16);
-dma_transfer_loop_region_builder(bios, iwram, 32);
-dma_transfer_loop_region_builder(iwram, iwram, 16);
-dma_transfer_loop_region_builder(iwram, iwram, 32);
-dma_transfer_loop_region_builder(ewram, iwram, 16);
-dma_transfer_loop_region_builder(ewram, iwram, 32);
-dma_transfer_loop_region_builder(vram, iwram, 16);
-dma_transfer_loop_region_builder(vram, iwram, 32);
-dma_transfer_loop_region_builder(palette_ram, iwram, 16);
-dma_transfer_loop_region_builder(palette_ram, iwram, 32);
-dma_transfer_loop_region_builder(oam_ram, iwram, 16);
-dma_transfer_loop_region_builder(oam_ram, iwram, 32);
-dma_transfer_loop_region_builder(io, iwram, 16);
-dma_transfer_loop_region_builder(io, iwram, 32);
-dma_transfer_loop_region_builder(gamepak, iwram, 16);
-dma_transfer_loop_region_builder(gamepak, iwram, 32);
-dma_transfer_loop_region_builder(ext, iwram, 16);
-dma_transfer_loop_region_builder(ext, iwram, 32);
-
-// To EWRAM
-dma_transfer_loop_region_builder(bios, ewram, 16);
-dma_transfer_loop_region_builder(bios, ewram, 32);
-dma_transfer_loop_region_builder(iwram, ewram, 16);
-dma_transfer_loop_region_builder(iwram, ewram, 32);
-dma_transfer_loop_region_builder(ewram, ewram, 16);
-dma_transfer_loop_region_builder(ewram, ewram, 32);
-dma_transfer_loop_region_builder(vram, ewram, 16);
-dma_transfer_loop_region_builder(vram, ewram, 32);
-dma_transfer_loop_region_builder(palette_ram, ewram, 16);
-dma_transfer_loop_region_builder(palette_ram, ewram, 32);
-dma_transfer_loop_region_builder(oam_ram, ewram, 16);
-dma_transfer_loop_region_builder(oam_ram, ewram, 32);
-dma_transfer_loop_region_builder(io, ewram, 16);
-dma_transfer_loop_region_builder(io, ewram, 32);
-dma_transfer_loop_region_builder(gamepak, ewram, 16);
-dma_transfer_loop_region_builder(gamepak, ewram, 32);
-dma_transfer_loop_region_builder(ext, ewram, 16);
-dma_transfer_loop_region_builder(ext, ewram, 32);
-
-// To VRAM
-dma_transfer_loop_region_builder(bios, vram, 16);
-dma_transfer_loop_region_builder(bios, vram, 32);
-dma_transfer_loop_region_builder(iwram, vram, 16);
-dma_transfer_loop_region_builder(iwram, vram, 32);
-dma_transfer_loop_region_builder(ewram, vram, 16);
-dma_transfer_loop_region_builder(ewram, vram, 32);
-dma_transfer_loop_region_builder(vram, vram, 16);
-dma_transfer_loop_region_builder(vram, vram, 32);
-dma_transfer_loop_region_builder(palette_ram, vram, 16);
-dma_transfer_loop_region_builder(palette_ram, vram, 32);
-dma_transfer_loop_region_builder(oam_ram, vram, 16);
-dma_transfer_loop_region_builder(oam_ram, vram, 32);
-dma_transfer_loop_region_builder(io, vram, 16);
-dma_transfer_loop_region_builder(io, vram, 32);
-dma_transfer_loop_region_builder(gamepak, vram, 16);
-dma_transfer_loop_region_builder(gamepak, vram, 32);
-dma_transfer_loop_region_builder(ext, vram, 16);
-dma_transfer_loop_region_builder(ext, vram, 32);
-
-// To Palette RAM
-dma_transfer_loop_region_builder(bios, palette_ram, 16);
-dma_transfer_loop_region_builder(bios, palette_ram, 32);
-dma_transfer_loop_region_builder(iwram, palette_ram, 16);
-dma_transfer_loop_region_builder(iwram, palette_ram, 32);
-dma_transfer_loop_region_builder(ewram, palette_ram, 16);
-dma_transfer_loop_region_builder(ewram, palette_ram, 32);
-dma_transfer_loop_region_builder(vram, palette_ram, 16);
-dma_transfer_loop_region_builder(vram, palette_ram, 32);
-dma_transfer_loop_region_builder(palette_ram, palette_ram, 16);
-dma_transfer_loop_region_builder(palette_ram, palette_ram, 32);
-dma_transfer_loop_region_builder(oam_ram, palette_ram, 16);
-dma_transfer_loop_region_builder(oam_ram, palette_ram, 32);
-dma_transfer_loop_region_builder(io, palette_ram, 16);
-dma_transfer_loop_region_builder(io, palette_ram, 32);
-dma_transfer_loop_region_builder(gamepak, palette_ram, 16);
-dma_transfer_loop_region_builder(gamepak, palette_ram, 32);
-dma_transfer_loop_region_builder(ext, palette_ram, 16);
-dma_transfer_loop_region_builder(ext, palette_ram, 32);
-
-// To OAM RAM
-dma_transfer_loop_region_builder(bios, oam_ram, 16);
-dma_transfer_loop_region_builder(bios, oam_ram, 32);
-dma_transfer_loop_region_builder(iwram, oam_ram, 16);
-dma_transfer_loop_region_builder(iwram, oam_ram, 32);
-dma_transfer_loop_region_builder(ewram, oam_ram, 16);
-dma_transfer_loop_region_builder(ewram, oam_ram, 32);
-dma_transfer_loop_region_builder(vram, oam_ram, 16);
-dma_transfer_loop_region_builder(vram, oam_ram, 32);
-dma_transfer_loop_region_builder(palette_ram, oam_ram, 16);
-dma_transfer_loop_region_builder(palette_ram, oam_ram, 32);
-dma_transfer_loop_region_builder(oam_ram, oam_ram, 16);
-dma_transfer_loop_region_builder(oam_ram, oam_ram, 32);
-dma_transfer_loop_region_builder(io, oam_ram, 16);
-dma_transfer_loop_region_builder(io, oam_ram, 32);
-dma_transfer_loop_region_builder(gamepak, oam_ram, 16);
-dma_transfer_loop_region_builder(gamepak, oam_ram, 32);
-dma_transfer_loop_region_builder(ext, oam_ram, 16);
-dma_transfer_loop_region_builder(ext, oam_ram, 32);
-
-// To I/O RAM
-dma_transfer_loop_region_builder(bios, io, 16);
-dma_transfer_loop_region_builder(bios, io, 32);
-dma_transfer_loop_region_builder(iwram, io, 16);
-dma_transfer_loop_region_builder(iwram, io, 32);
-dma_transfer_loop_region_builder(ewram, io, 16);
-dma_transfer_loop_region_builder(ewram, io, 32);
-dma_transfer_loop_region_builder(vram, io, 16);
-dma_transfer_loop_region_builder(vram, io, 32);
-dma_transfer_loop_region_builder(palette_ram, io, 16);
-dma_transfer_loop_region_builder(palette_ram, io, 32);
-dma_transfer_loop_region_builder(oam_ram, io, 16);
-dma_transfer_loop_region_builder(oam_ram, io, 32);
-dma_transfer_loop_region_builder(io, io, 16);
-dma_transfer_loop_region_builder(io, io, 32);
-dma_transfer_loop_region_builder(gamepak, io, 16);
-dma_transfer_loop_region_builder(gamepak, io, 32);
-dma_transfer_loop_region_builder(ext, io, 16);
-dma_transfer_loop_region_builder(ext, io, 32);
-
-// To extended RAM
-dma_transfer_loop_region_builder(bios, ext, 16);
-dma_transfer_loop_region_builder(bios, ext, 32);
-dma_transfer_loop_region_builder(iwram, ext, 16);
-dma_transfer_loop_region_builder(iwram, ext, 32);
-dma_transfer_loop_region_builder(ewram, ext, 16);
-dma_transfer_loop_region_builder(ewram, ext, 32);
-dma_transfer_loop_region_builder(vram, ext, 16);
-dma_transfer_loop_region_builder(vram, ext, 32);
-dma_transfer_loop_region_builder(palette_ram, ext, 16);
-dma_transfer_loop_region_builder(palette_ram, ext, 32);
-dma_transfer_loop_region_builder(oam_ram, ext, 16);
-dma_transfer_loop_region_builder(oam_ram, ext, 32);
-dma_transfer_loop_region_builder(io, ext, 16);
-dma_transfer_loop_region_builder(io, ext, 32);
-dma_transfer_loop_region_builder(gamepak, ext, 16);
-dma_transfer_loop_region_builder(gamepak, ext, 32);
-dma_transfer_loop_region_builder(ext, ext, 16);
-dma_transfer_loop_region_builder(ext, ext, 32);
-
-#define dma_transfer_loop(src_op, dest_op, transfer_size, wb)                 \
-{                                                                             \
-  u32 src_region = src_ptr >> 24;                                             \
-  u32 dest_region = dest_ptr >> 24;                                           \
-  dma_region_type src_region_type = dma_region_map[src_region];               \
-  dma_region_type dest_region_type = dma_region_map[dest_region];             \
-                                                                              \
-  switch(src_region_type | (dest_region_type << 4))                           \
-  {                                                                           \
-    case (DMA_REGION_BIOS | (DMA_REGION_IWRAM << 4)):                         \
-      dma_transfer_loop_region(bios, iwram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_IWRAM << 4)):                        \
-      dma_transfer_loop_region(iwram, iwram, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_IWRAM << 4)):                        \
-      dma_transfer_loop_region(ewram, iwram, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_IWRAM << 4)):                         \
-      dma_transfer_loop_region(vram, iwram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_IWRAM << 4)):                  \
-      dma_transfer_loop_region(palette_ram, iwram, src_op, dest_op,           \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_IWRAM << 4)):                      \
-      dma_transfer_loop_region(oam_ram, iwram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_IWRAM << 4)):                           \
-      dma_transfer_loop_region(io, iwram, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_IWRAM << 4)):                      \
-      dma_transfer_loop_region(gamepak, iwram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_IWRAM << 4)):                          \
-      dma_transfer_loop_region(ext, iwram, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_EWRAM << 4)):                         \
-      dma_transfer_loop_region(bios, ewram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_EWRAM << 4)):                        \
-      dma_transfer_loop_region(iwram, ewram, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_EWRAM << 4)):                        \
-      dma_transfer_loop_region(ewram, ewram, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_EWRAM << 4)):                         \
-      dma_transfer_loop_region(vram, ewram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_EWRAM << 4)):                  \
-      dma_transfer_loop_region(palette_ram, ewram, src_op, dest_op,           \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_EWRAM << 4)):                      \
-      dma_transfer_loop_region(oam_ram, ewram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_EWRAM << 4)):                           \
-      dma_transfer_loop_region(io, ewram, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_EWRAM << 4)):                      \
-      dma_transfer_loop_region(gamepak, ewram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_EWRAM << 4)):                          \
-      dma_transfer_loop_region(ext, ewram, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_VRAM << 4)):                          \
-      dma_transfer_loop_region(bios, vram, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_VRAM << 4)):                         \
-      dma_transfer_loop_region(iwram, vram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_VRAM << 4)):                         \
-      dma_transfer_loop_region(ewram, vram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_VRAM << 4)):                          \
-      dma_transfer_loop_region(vram, vram, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_VRAM << 4)):                   \
-      dma_transfer_loop_region(palette_ram, vram, src_op, dest_op,            \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_VRAM << 4)):                       \
-      dma_transfer_loop_region(oam_ram, vram, src_op, dest_op,                \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_VRAM << 4)):                            \
-      dma_transfer_loop_region(io, vram, src_op, dest_op,                     \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_VRAM << 4)):                       \
-      dma_transfer_loop_region(gamepak, vram, src_op, dest_op,                \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_VRAM << 4)):                           \
-      dma_transfer_loop_region(ext, vram, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_PALETTE_RAM << 4)):                   \
-      dma_transfer_loop_region(bios, palette_ram, src_op, dest_op,            \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_PALETTE_RAM << 4)):                  \
-      dma_transfer_loop_region(iwram, palette_ram, src_op, dest_op,           \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_PALETTE_RAM << 4)):                  \
-      dma_transfer_loop_region(ewram, palette_ram, src_op, dest_op,           \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_PALETTE_RAM << 4)):                   \
-      dma_transfer_loop_region(vram, palette_ram, src_op, dest_op,            \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_PALETTE_RAM << 4)):            \
-      dma_transfer_loop_region(palette_ram, palette_ram, src_op, dest_op,     \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_PALETTE_RAM << 4)):                \
-      dma_transfer_loop_region(oam_ram, palette_ram, src_op, dest_op,         \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_PALETTE_RAM << 4)):                     \
-      dma_transfer_loop_region(io, palette_ram, src_op, dest_op,              \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_PALETTE_RAM << 4)):                \
-      dma_transfer_loop_region(gamepak, palette_ram, src_op, dest_op,         \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_PALETTE_RAM << 4)):                    \
-      dma_transfer_loop_region(ext, palette_ram, src_op, dest_op,             \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_OAM_RAM << 4)):                       \
-      dma_transfer_loop_region(bios, oam_ram, src_op, dest_op,                \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_OAM_RAM << 4)):                      \
-      dma_transfer_loop_region(iwram, oam_ram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_OAM_RAM << 4)):                      \
-      dma_transfer_loop_region(ewram, oam_ram, src_op, dest_op,               \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_OAM_RAM << 4)):                       \
-      dma_transfer_loop_region(vram, oam_ram, src_op, dest_op,                \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_OAM_RAM << 4)):                \
-      dma_transfer_loop_region(palette_ram, oam_ram, src_op, dest_op,         \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_OAM_RAM << 4)):                    \
-      dma_transfer_loop_region(oam_ram, oam_ram, src_op, dest_op,             \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_OAM_RAM << 4)):                         \
-      dma_transfer_loop_region(io, oam_ram, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_OAM_RAM << 4)):                    \
-      dma_transfer_loop_region(gamepak, oam_ram, src_op, dest_op,             \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_OAM_RAM << 4)):                        \
-      dma_transfer_loop_region(ext, oam_ram, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_IO << 4)):                            \
-      dma_transfer_loop_region(bios, io, src_op, dest_op,                     \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_IO << 4)):                           \
-      dma_transfer_loop_region(iwram, io, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_IO << 4)):                           \
-      dma_transfer_loop_region(ewram, io, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_IO << 4)):                            \
-      dma_transfer_loop_region(vram, io, src_op, dest_op,                     \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_IO << 4)):                     \
-      dma_transfer_loop_region(palette_ram, io, src_op, dest_op,              \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_IO << 4)):                         \
-      dma_transfer_loop_region(oam_ram, io, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_IO << 4)):                              \
-      dma_transfer_loop_region(io, io, src_op, dest_op,                       \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_IO << 4)):                         \
-      dma_transfer_loop_region(gamepak, io, src_op, dest_op,                  \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_IO << 4)):                             \
-      dma_transfer_loop_region(ext, io, src_op, dest_op,                      \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_BIOS | (DMA_REGION_EXT << 4)):                           \
-      dma_transfer_loop_region(bios, ext, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IWRAM | (DMA_REGION_EXT << 4)):                          \
-      dma_transfer_loop_region(iwram, ext, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EWRAM | (DMA_REGION_EXT << 4)):                          \
-      dma_transfer_loop_region(ewram, ext, src_op, dest_op,                   \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_VRAM | (DMA_REGION_EXT << 4)):                           \
-      dma_transfer_loop_region(vram, ext, src_op, dest_op,                    \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_PALETTE_RAM | (DMA_REGION_EXT << 4)):                    \
-      dma_transfer_loop_region(palette_ram, ext, src_op, dest_op,             \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_OAM_RAM | (DMA_REGION_EXT << 4)):                        \
-      dma_transfer_loop_region(oam_ram, ext, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_IO | (DMA_REGION_EXT << 4)):                             \
-      dma_transfer_loop_region(io, ext, src_op, dest_op,                      \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_GAMEPAK | (DMA_REGION_EXT << 4)):                        \
-      dma_transfer_loop_region(gamepak, ext, src_op, dest_op,                 \
-       transfer_size, wb);                                                    \
-                                                                              \
-    case (DMA_REGION_EXT | (DMA_REGION_EXT << 4)):                            \
-      dma_transfer_loop_region(ext, ext, src_op, dest_op,                     \
-       transfer_size, wb);                                                    \
-  }                                                                           \
-}                                                                             \
-
-
-#define dma_transfer_expand(transfer_size)                                    \
-  if (dma->source_direction != 3)                                             \
-  {                                                                           \
-    void (*src_op) (uint32_t*, uint_fast8_t);                                 \
-    void (*dest_op) (uint32_t*, uint_fast8_t);                                \
-    void (*writeback_op) (DMA_TRANSFER_TYPE*, uint32_t);                      \
-    switch (dma->dest_direction)                                              \
-    {                                                                         \
-      case 0:                                                                 \
-        dest_op = dma_adjust_ptr_inc;                                         \
-        writeback_op = dma_adjust_reg_writeback;                              \
-        break;                                                                \
-                                                                              \
-      case 1:                                                                 \
-        dest_op = dma_adjust_ptr_dec;                                         \
-        writeback_op = dma_adjust_reg_writeback;                              \
-        break;                                                                \
-                                                                              \
-      case 2:                                                                 \
-        dest_op = dma_adjust_ptr_fix;                                         \
-        writeback_op = dma_adjust_reg_writeback;                              \
-        break;                                                                \
-                                                                              \
-      case 3:                                                                 \
-        dest_op = dma_adjust_ptr_inc;                                         \
-        writeback_op = dma_adjust_reg_reload;                                 \
-        break;                                                                \
-                                                                              \
-      default: /* To satisfy the compiler */                                  \
-        dest_op = NULL;                                                       \
-        writeback_op = NULL;                                                  \
-        break;                                                                \
-    }                                                                         \
-    switch (dma->source_direction)                                            \
-    {                                                                         \
-      case 0:  src_op = dma_adjust_ptr_inc;  break;                           \
-      case 1:  src_op = dma_adjust_ptr_dec;  break;                           \
-      case 2:  src_op = dma_adjust_ptr_fix;  break;                           \
-      default: src_op = NULL; /* compiler */ break;                           \
-    }                                                                         \
-    dma_transfer_loop(src_op, dest_op, transfer_size, writeback_op);          \
-  }                                                                           \
-
-CPU_ALERT_TYPE dma_transfer(DMA_TRANSFER_TYPE *dma)
-{
-  u32 i;
-  u32 length = dma->length;
-  u32 read_value;
-  u32 src_ptr = dma->source_address;
-  u32 dest_ptr = dma->dest_address;
-  CPU_ALERT_TYPE return_value = CPU_ALERT_NONE;
-
-  // Technically this should be done for source and destination, but
-  // chances are this is only ever used (probably mistakingly!) for dest.
-  // The only game I know of that requires this is Lucky Luke.
-  if((dest_ptr >> 24) != ((dest_ptr + length - 1) >> 24))
-  {
-    u32 first_length = ((dest_ptr & 0xFF000000) + 0x1000000) - dest_ptr;
-    u32 second_length = length - first_length;
-    dma->length = first_length;
-
-    dma_transfer(dma);
-
-    dma->length = length;
-
-    length = second_length;
-    dest_ptr += first_length;
-    src_ptr += first_length;
-  }
-
-  if(dma->length_type == DMA_16BIT)
-  {
-    src_ptr &= ~0x01;
-    dest_ptr &= ~0x01;
-    dma_transfer_expand(16);
-  }
-  else
-  {
-    src_ptr &= ~0x03;
-    dest_ptr &= ~0x03;
-    dma_transfer_expand(32);
-  }
-
-  if((dma->repeat_type == DMA_NO_REPEAT) ||
-   (dma->start_type == DMA_START_IMMEDIATELY))
-  {
-    dma->start_type = DMA_INACTIVE;
-    ADDRESS16(io_registers, (dma->dma_channel * 12) + 0xBA) &= (~0x8000);
-  }
-
-  if(dma->irq)
-  {
-    raise_interrupt(IRQ_DMA0 << dma->dma_channel);
-    return_value |= CPU_ALERT_IRQ;
-  }
-
-  return return_value;
-}
-
-// Be sure to do this after loading ROMs.
-
-#define map_region(type, start, end, mirror_blocks, region)                   \
-  for(map_offset = (start) / 0x8000; map_offset <                             \
-   ((end) / 0x8000); map_offset++)                                            \
-  {                                                                           \
-    memory_map_##type[map_offset] =                                           \
-     ((u8 *)region) + ((map_offset % mirror_blocks) * 0x8000);                \
-  }                                                                           \
-
-#define map_null(type, start, end)                                            \
-  for(map_offset = start / 0x8000; map_offset < (end / 0x8000);               \
-   map_offset++)                                                              \
-  {                                                                           \
-    memory_map_##type[map_offset] = NULL;                                     \
-  }                                                                           \
-
-#define map_ram_region(type, start, end, mirror_blocks, region)               \
-  for(map_offset = (start) / 0x8000; map_offset <                             \
-   ((end) / 0x8000); map_offset++)                                            \
-  {                                                                           \
-    memory_map_##type[map_offset] =                                           \
-     ((u8 *)region) + ((map_offset % mirror_blocks) * 0x10000) + 0x8000;      \
-  }                                                                           \
-
-#define map_vram(type)                                                        \
-  for(map_offset = 0x6000000 / 0x8000; map_offset < (0x7000000 / 0x8000);     \
-   map_offset += 4)                                                           \
-  {                                                                           \
-    memory_map_##type[map_offset] = vram;                                     \
-    memory_map_##type[map_offset + 1] = vram + 0x8000;                        \
-    memory_map_##type[map_offset + 2] = vram + (0x8000 * 2);                  \
-    memory_map_##type[map_offset + 3] = vram + (0x8000 * 2);                  \
-  }                                                                           \
-
-u32 evict_gamepak_page()
-{
-	// We will evict the page with index gamepak_next_swap, a bit like a ring
-	// buffer.
-	u32 page_index = gamepak_next_swap;
-	gamepak_next_swap++;
-	if (gamepak_next_swap >= gamepak_ram_pages)
-		gamepak_next_swap = 0;
-	u16 physical_index = gamepak_memory_map[page_index];
-
-	memory_map_read[(0x8000000 / (32 * 1024)) + physical_index] = NULL;
-	memory_map_read[(0xA000000 / (32 * 1024)) + physical_index] = NULL;
-	memory_map_read[(0xC000000 / (32 * 1024)) + physical_index] = NULL;
-
-#if TRACE_MEMORY
-	ReGBA_Trace("T: Evicting virtual page %u", page_index);
-#endif
-	
-	return page_index;
-}
-
-u8 *load_gamepak_page(u16 physical_index)
-{
-	if (memory_map_read[(0x08000000 / (32 * 1024)) + (uint32_t) physical_index] != NULL)
-	{
-#if TRACE_MEMORY
-		ReGBA_Trace("T: Not reloading already loaded Game Pak page %u (%08X..%08X)", (uint32_t) physical_index, 0x08000000 + physical_index * (32 * 1024), 0x08000000 + (uint32_t) physical_index * (32 * 1024) + 0x7FFF);
-#endif
-		return memory_map_read[(0x08000000 / (32 * 1024)) + (uint32_t) physical_index];
-	}
-#if TRACE_MEMORY
-	ReGBA_Trace("T: Loading Game Pak page %u (%08X..%08X)", (uint32_t) physical_index, 0x08000000 + (uint32_t) physical_index * (32 * 1024), 0x08000000 + (uint32_t) physical_index * (32 * 1024) + 0x7FFF);
-#endif
-	if((uint32_t) physical_index >= (gamepak_size >> 15))
-		return gamepak_rom;
-
-	u16 page_index = evict_gamepak_page();
-	u32 page_offset = (uint32_t) page_index * (32 * 1024);
-	u8 *swap_location = gamepak_rom + page_offset;
-
-	gamepak_memory_map[page_index] = physical_index;
-
-	FILE_SEEK(gamepak_file_large, (off_t) physical_index * (32 * 1024), SEEK_SET);
-	FILE_READ(gamepak_file_large, swap_location, (32 * 1024));
-
-	memory_map_read[(0x8000000 / (32 * 1024)) + physical_index] =
-		memory_map_read[(0xA000000 / (32 * 1024)) + physical_index] =
-		memory_map_read[(0xC000000 / (32 * 1024)) + physical_index] = swap_location;
-
-	// If RTC is active page the RTC register bytes so they can be read
-	if((rtc_state != RTC_DISABLED) && (physical_index == 0))
-	{
-		memcpy(swap_location + 0xC4, rtc_registers, sizeof(rtc_registers));
-	}
-
-	return swap_location;
-}
-
-void init_memory_gamepak()
-{
-  u32 map_offset = 0;
-
-  if (FILE_CHECK_VALID(gamepak_file_large))
-  {
-    // Large ROMs get special treatment because they
-    // can't fit into the ROM buffer.
-    // The size of this buffer varies per platform, and may actually
-    // fit all of the ROM, in which case this is dead code.
-    memset(gamepak_memory_map, 0, sizeof(gamepak_memory_map));
-    gamepak_next_swap = 0;
-
-    map_null(read, 0x8000000, 0xE000000);
-  }
-  else
-  {
-    map_region(read, 0x8000000, 0x8000000 + gamepak_size, 1024, gamepak_rom);
-    map_null(read, 0x8000000 + gamepak_size, 0xA000000);
-    map_region(read, 0xA000000, 0xA000000 + gamepak_size, 1024, gamepak_rom);
-    map_null(read, 0xA000000 + gamepak_size, 0xC000000);
-    map_region(read, 0xC000000, 0xC000000 + gamepak_size, 1024, gamepak_rom);
-    map_null(read, 0xC000000 + gamepak_size, 0xE000000);
-  }
-}
-
-void init_memory()
-{
-  u32 map_offset = 0;
-
-  memory_regions[0x00] = (u8 *)bios.rom;
-  memory_regions[0x01] = (u8 *)bios.rom;
-  memory_regions[0x02] = (u8 *)ewram_data;
-  memory_regions[0x03] = (u8 *)iwram_data;
-  memory_regions[0x04] = (u8 *)io_registers;
-  memory_regions[0x05] = (u8 *)palette_ram;
-  memory_regions[0x06] = (u8 *)vram;
-  memory_regions[0x07] = (u8 *)oam_ram;
-  memory_regions[0x08] = (u8 *)gamepak_rom;
-  memory_regions[0x09] = (u8 *)(gamepak_rom + 0xFFFFFF);
-  memory_regions[0x0A] = (u8 *)gamepak_rom;
-  memory_regions[0x0B] = (u8 *)(gamepak_rom + 0xFFFFFF);
-  memory_regions[0x0C] = (u8 *)gamepak_rom;
-  memory_regions[0x0D] = (u8 *)(gamepak_rom + 0xFFFFFF);
-  memory_regions[0x0E] = (u8 *)gamepak_backup;
-
-  memory_limits[0x00] = 0x3FFF;
-  memory_limits[0x01] = 0x3FFF;
-  memory_limits[0x02] = 0x3FFFF;
-  memory_limits[0x03] = 0x7FFF;
-  memory_limits[0x04] = 0x7FFF;
-  memory_limits[0x05] = 0x3FF;
-  memory_limits[0x06] = 0x17FFF;
-  memory_limits[0x07] = 0x3FF;
-  memory_limits[0x08] = 0x1FFFFFF;
-  memory_limits[0x09] = 0x1FFFFFF;
-  memory_limits[0x0A] = 0x1FFFFFF;
-  memory_limits[0x0B] = 0x1FFFFFF;
-  memory_limits[0x0C] = 0x1FFFFFF;
-  memory_limits[0x0D] = 0x1FFFFFF;
-  memory_limits[0x0E] = 0xFFFF;
-
-  // Fill memory map regions, areas marked as NULL must be checked directly
-  map_region(read, 0x0000000, 0x1000000, 1, bios.rom);
-  map_null(read, 0x1000000, 0x2000000);
-  map_region(read, 0x2000000, 0x3000000, 8, ewram_data);
-  map_region(read, 0x3000000, 0x4000000, 1, iwram_data);
-  map_region(read, 0x4000000, 0x5000000, 1, io_registers);
-  map_null(read, 0x5000000, 0x6000000);
-  map_vram(read);
-  map_null(read, 0x7000000, 0x8000000);
-  init_memory_gamepak();
-  map_null(read, 0xE000000, 0x10000000);
-
-  // Fill memory map regions, areas marked as NULL must be checked directly
-  map_null(write, 0x0000000, 0x2000000);
-  map_region(write, 0x2000000, 0x3000000, 8, ewram_data);
-  map_region(write, 0x3000000, 0x4000000, 1, iwram_data);
-  map_null(write, 0x4000000, 0x5000000);
-  map_null(write, 0x5000000, 0x6000000);
-
-  map_vram(write);
-
-  map_null(write, 0x7000000, 0x8000000);
-  map_null(write, 0x8000000, 0xE000000);
-  map_null(write, 0xE000000, 0x10000000);
-
-  memset(io_registers, 0, sizeof(io_registers));
-  memset(oam_ram, 0, sizeof(oam_ram));
-  memset(palette_ram, 0, sizeof(palette_ram));
-  memset(iwram_data, 0, sizeof(iwram_data));
-  memset(ewram_data, 0, sizeof(ewram_data));
-  memset(vram, 0, sizeof(vram));
-
-  io_registers[REG_DISPCNT] = 0x80;
-  io_registers[REG_P1] = 0x3FF;
-  io_registers[REG_BG2PA] = 0x100;
-  io_registers[REG_BG2PD] = 0x100;
-  io_registers[REG_BG3PA] = 0x100;
-  io_registers[REG_BG3PD] = 0x100;
-  //io_registers[REG_RCNT] = 0x8000;
-  //io_registers[REG_SIOCNT] = 0x000C;
-
-  io_registers[REG_RCNT] = 0x0000;
-  io_registers[REG_SIOCNT] = 0x0004;
-
-
-
-  sram_size = SRAM_SIZE_32KB;
-  flash_size = FLASH_SIZE_64KB;
-
-  flash_bank_offset = 0;
-  flash_command_position = 0;
-  eeprom_size = EEPROM_512_BYTE;
-  eeprom_mode = EEPROM_BASE_MODE;
-  eeprom_address = 0;
-  eeprom_counter = 0;
-
-  flash_mode = FLASH_BASE_MODE;
-
-  rtc_state = RTC_DISABLED;
-  memset(rtc_registers, 0, sizeof(rtc_registers));
-  bios_read_protect = 0xe129f000;
-
-  mem_save_flag = 0;
-}
-
-void bios_region_read_allow()
-{
-  memory_map_read[0] = bios.rom;
-}
-
-void bios_region_read_protect()
-{
-  memory_map_read[0] = NULL;
-}
-
-// TODO:savestate_fileは必要ないので削除する
 // type = read_mem / write_mem
 #define savestate_block(type)                                                 \
   cpu_##type##_savestate();                                                   \
@@ -3814,14 +3401,6 @@ void loadstate_rewind(void)
 	clear_metadata_area(METADATA_AREA_VRAM, CLEAR_REASON_LOADING_STATE);
 
 	oam_update = 1;
-	gbc_sound_update = 1;
-
-	// Oops, these contain raw pointers
-	for(i = 0; i < 4; i++)
-	{
-		gbc_sound_channel[i].sample_data = square_pattern_duty[2];
-	}
-
 	reg[CHANGED_PC_STATUS] = 1;
 }
 
@@ -3883,10 +3462,10 @@ u32 load_state(uint32_t SlotNumber)
 		{
 			unsigned int n;
 			for (n = 0; n < 4; n++) {
-				gbc_sound_channel[n].frequency_step = FLOAT_TO_FP16_16(FP16_16_TO_FLOAT(gbc_sound_channel[n].frequency_step) * 65536.0f / SOUND_FREQUENCY);
+				gbc_sound_channel[n].frequency_step = FLOAT_TO_FP08_24(FP08_24_TO_FLOAT(gbc_sound_channel[n].frequency_step) * 65536.0f / SOUND_FREQUENCY);
 			}
 			for (n = 0; n < 2; n++) {
-				timer[n].frequency_step = FLOAT_TO_FP16_16(FP16_16_TO_FLOAT(timer[n].frequency_step) * 65536.0f / SOUND_FREQUENCY);
+				timer[n].frequency_step = FLOAT_TO_FP08_24(FP08_24_TO_FLOAT(timer[n].frequency_step) * 65536.0f / SOUND_FREQUENCY);
 			}
 		}
 
@@ -3897,14 +3476,6 @@ u32 load_state(uint32_t SlotNumber)
 		clear_metadata_area(METADATA_AREA_VRAM, CLEAR_REASON_LOADING_STATE);
 
 		oam_update = 1;
-		gbc_sound_update = 1;
-
-		// Oops, these contain raw pointers
-		for(i = 0; i < 4; i++)
-		{
-			gbc_sound_channel[i].sample_data = square_pattern_duty[2];
-		}
-
 		reg[CHANGED_PC_STATUS] = 1;
 
 		return 0;
@@ -3979,8 +3550,6 @@ fail:
   }
   ReGBA_ProgressFinalise();
 
-  mem_save_flag = 1;
-
   return ret;
 }
 
@@ -3988,45 +3557,52 @@ fail:
     FILE_READ_MEM_ARRAY(g_state_buffer_ptr, name);                            \
 
 #define SAVESTATE_WRITE_MEM_FILENAME(name)                                    \
-    FILE_WRITE_MEM_ARRAY(g_state_buffer_ptr, name);                       \
+    FILE_WRITE_MEM_ARRAY(g_state_buffer_ptr, name);                           \
 
 #define memory_savestate_body(type)                                           \
 {                                                                             \
-  u32 i;                                                                      \
   char fullname[512];                                                         \
   memset(fullname, 0, sizeof(fullname));                                      \
                                                                               \
+  SAVESTATE_##type##_FILENAME(fullname);                                      \
+                                                                              \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, backup_type);                    \
+                                                                              \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, sram_size);                      \
+                                                                              \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_size);                     \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_mode);                     \
-  FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_command_position);         \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_bank_offset);              \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_device_id);                \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_manufacturer_id);          \
-  FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_size);                     \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, flash_command_position);         \
+                                                                              \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, eeprom_size);                    \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, eeprom_mode);                    \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, eeprom_address_length);          \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, eeprom_address);                 \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, eeprom_counter);                 \
+  FILE_##type##_ARRAY(g_state_buffer_ptr, eeprom_buffer);                     \
+                                                                              \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_state);                      \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_write_mode);                 \
-  FILE_##type##_ARRAY(g_state_buffer_ptr, rtc_registers);                     \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_command);                    \
-  FILE_##type##_ARRAY(g_state_buffer_ptr, rtc_data);                          \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_status);                     \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_data_bytes);                 \
   FILE_##type##_VARIABLE(g_state_buffer_ptr, rtc_bit_count);                  \
-  FILE_##type##_ARRAY(g_state_buffer_ptr, eeprom_buffer);                     \
-  SAVESTATE_##type##_FILENAME(fullname);                                      \
+  FILE_##type##_ARRAY(g_state_buffer_ptr, rtc_registers);                     \
+  FILE_##type##_ARRAY(g_state_buffer_ptr, rtc_data);                          \
+                                                                              \
   FILE_##type##_ARRAY(g_state_buffer_ptr, dma);                               \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_dma_hack);                   \
+  FILE_##type##_VARIABLE(g_state_buffer_ptr, cpu_dma_last);                   \
                                                                               \
   FILE_##type##_ARRAY(g_state_buffer_ptr, iwram_data);                        \
   FILE_##type##_ARRAY(g_state_buffer_ptr, ewram_data);                        \
   FILE_##type(g_state_buffer_ptr, vram, 0x18000);                             \
   FILE_##type(g_state_buffer_ptr, oam_ram, 0x400);                            \
   FILE_##type(g_state_buffer_ptr, palette_ram, 0x400);                        \
-  FILE_##type(g_state_buffer_ptr, io_registers, 0x8000);                      \
+  FILE_##type(g_state_buffer_ptr, io_registers, 0x400);                       \
 }                                                                             \
 
 void memory_read_mem_savestate()
@@ -4035,31 +3611,3 @@ memory_savestate_body(READ_MEM);
 void memory_write_mem_savestate()
 memory_savestate_body(WRITE_MEM);
 
-u32 get_sio_mode(u16 io1, u16 io2)
-{
-  if(!(io2 & 0x8000))
-  {
-    switch(io1 & 0x3000)
-    {
-      case 0x0000:
-        return SIO_NORMAL8;
-      case 0x1000:
-        return SIO_NORMAL32;
-      case 0x2000:
-        return SIO_MULTIPLAYER;
-      case 0x3000:
-        return SIO_UART;
-    }
-  }
-  if(io2 & 0x4000)
-  {
-    return SIO_JOYBUS;
-  }
-  return SIO_GP;
-}
-
-// multiモードのデータを送る
-u32 send_adhoc_multi()
-{
-  return 0;
-}

@@ -22,7 +22,7 @@
 #ifndef _DS2SOUND_H_
 #define _DS2SOUND_H_
 
-#define AUDIO_LEN 1536
+#define AUDIO_LEN 768
 
 // OUTPUT_SOUND_FREQUENCY should be a power-of-2 fraction of SOUND_FREQUENCY;
 // if not, ds2sound.c's ReGBA_AudioUpdate() needs to resample the output.

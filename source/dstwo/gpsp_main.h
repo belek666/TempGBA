@@ -30,43 +30,25 @@
 #define LANGUAGE_PACK   "SYSTEM/language.msg"
 
 /******************************************************************************
- * マクロ等の定義
- ******************************************************************************/
-
-typedef enum
-{
-  auto_frameskip,
-  manual_frameskip,
-  no_frameskip
-} FRAMESKIP_TYPE;
-
-/******************************************************************************
  * グローバル変数の宣言
  ******************************************************************************/
 extern u32 execute_cycles;
+extern u32 cpu_ticks;
+extern u32 dma_cycle_count;
+
 extern u32 to_skip;
-extern u32 global_cycles_per_instruction;
-extern u32 synchronize_flag;
 extern u32 skip_next_frame_flag;
-extern u32 prescale_table[];
-extern volatile u32 real_frame_count;
-extern u32 virtual_frame_count;
-extern int date_format;
 extern u32 frame_ticks;
 extern unsigned int frame_interval; // For in-memory saved states used in rewinding
 
-extern u32 fast_backward;
 /******************************************************************************
  * グローバル関数の宣言
  ******************************************************************************/
-void set_cpu_clock(u32 clock);
-u32 update_gba();
-void reset_gba();
-void synchronize();
-void quit();
-void game_name_ext(u8 *src, u8 *buffer, u8 *extension);
-void main_read_mem_savestate();
-void main_write_mem_savestate();
+u32 update_gba(void);
+void reset_gba(void);
+void quit(void);
+void main_read_mem_savestate(void);
+void main_write_mem_savestate(void);
 void error_msg(char *text);
 void change_ext(char *src, char *buffer, char *extension);
 extern int gpsp_main(int argc, char **argv);

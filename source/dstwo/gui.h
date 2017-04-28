@@ -122,7 +122,8 @@ typedef struct
   u32 DisplayFPS;
   u32 BottomScreenGame;
   u32 BootFromBIOS;
-  u32 Reserved2[111];
+  u32 UpdateBackup;
+  u32 Reserved2[110];
 } GPSP_CONFIG_FILE;
 
 // Runtime settings for the current game. Not persistent and reset between
@@ -221,6 +222,9 @@ extern GAME_CONFIG_FILE game_persistent_config;
 
 #define SKIP_RATE (game_config.frameskip_value)
 #define AUTO_SKIP (game_config.frameskip_type)
+
+extern u32 fast_backward;
+
 /******************************************************************************
  * グローバル関数の宣言
  ******************************************************************************/

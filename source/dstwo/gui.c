@@ -71,20 +71,20 @@ char *language_options[] = { (char *) &lang[0], (char *) &lang[1], (char *) &lan
 
 #define NDSGBA_VERSION "1.45"
 
-#define GPSP_CONFIG_FILENAME "SYSTEM/ndsgba.cfg"
+#define GPSP_CONFIG_FILENAME "SYSTEM/tempgba-mod.cfg"
 
 // dsGBA的一套头文件
 // 标题 4字节
-#define GPSP_CONFIG_HEADER  "NGBA1.1"
-#define GPSP_CONFIG_HEADER_SIZE 7
+#define GPSP_CONFIG_HEADER  "REGBA0.1"
+#define GPSP_CONFIG_HEADER_SIZE 8
 const u32 gpsp_config_ver = 0x00010001;
 GPSP_CONFIG gpsp_config;
 GPSP_CONFIG_FILE gpsp_persistent_config;
 
 // GAME的一套头文件
 // 标题 4字节
-#define GAME_CONFIG_HEADER     "GAME1.1"
-#define GAME_CONFIG_HEADER_SIZE 7
+#define GAME_CONFIG_HEADER     "GAMEH0.1"
+#define GAME_CONFIG_HEADER_SIZE 8
 // #define GAME_CONFIG_HEADER_U32 0x67666367
 const u32 game_config_ver = 0x00010001;
 GAME_CONFIG game_config;
@@ -1667,11 +1667,7 @@ void init_default_gpsp_config()
   gpsp_persistent_config.ButtonMappings[3] /* GBA START */ = KEY_START;
   gpsp_persistent_config.ButtonMappings[4] /* GBA R */ = KEY_R;
   gpsp_persistent_config.ButtonMappings[5] /* GBA L */ = KEY_L;
-#if USE_C_CORE
-  gpsp_config.emulate_core = C_CORE;
-#else
   gpsp_config.emulate_core = ASM_CORE;
-#endif
   gpsp_config.debug_flag = NO;
   gpsp_config.fake_fat = NO;
   gpsp_config.rom_file[0]= 0;
@@ -1892,10 +1888,12 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 	void menu_exit()
 	{
 		HighFrequencyCPU(); // Crank it up, leave quickly
+/*
 		if(IsGameLoaded)
 		{
 			update_backup_force();
 		}
+*/
 		quit();
 	}
 
@@ -3089,6 +3087,8 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 
     char *rewinding_options[] = { (char*)&msg[MSG_VIDEO_REWINDING_0], (char*)&msg[MSG_VIDEO_REWINDING_1], (char*)&msg[MSG_VIDEO_REWINDING_2], (char*)&msg[MSG_VIDEO_REWINDING_3], (char*)&msg[MSG_VIDEO_REWINDING_4], (char*)&msg[MSG_VIDEO_REWINDING_5], (char*)&msg[MSG_VIDEO_REWINDING_6] };
 
+    char *update_backup_options[] = { (char*)&msg[MSG_OPTIONS_UPDATE_BACKUP_EXITONLY], (char*)&msg[MSG_OPTIONS_UPDATE_BACKUP_AUTO] };
+
     char *cpu_frequency_options[] = { (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_0], (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_1], (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_2], (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_3], (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_4], (char*)&msg[MSG_OPTIONS_CPU_FREQUENCY_5] };
 
     char *on_off_options[] = { (char*)&msg[MSG_GENERAL_OFF], (char*)&msg[MSG_GENERAL_ON] };
@@ -3401,6 +3401,9 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 	char* gamepak_maker_ptr = gamepak_maker;
 	char* vender_code_options[] = { (char*) &gamepak_maker_ptr };
 	char* VENDER_CODE      = "vender_code     %s";
+	char* gamepak_backup_id_ptr = backup_id;
+	char* backup_id_options[] = { (char*) &gamepak_backup_id_ptr };
+	char* BACKUP_ID        = "backup_id          %s";
 
   /*--------------------------------------------------------
      Tools - Debugging - ROM information
@@ -3417,6 +3420,9 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 
 	/* 03 */ STRING_SELECTION_HIDE_OPTION(NULL, NULL, &VENDER_CODE,
         vender_code_options, &zero, 1, NULL, 3),
+
+	/* 04 */ STRING_SELECTION_HIDE_OPTION(NULL, NULL, &BACKUP_ID,
+        backup_id_options, &zero, 1, NULL, 4),
     };
     MAKE_MENU(tools_debug_rom_info, NULL, NULL, NULL, NULL, 0, 0);
 
@@ -3488,31 +3494,34 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 	{
 	/* 00 */ SUBMENU_OPTION(NULL, &msg[MSG_MAIN_MENU_OPTIONS], NULL, 0),
 
+	/* 01 */ STRING_SELECTION_OPTION(NULL, NULL, &msg[FMT_OPTIONS_UPDATE_BACKUP], update_backup_options,
+        &gpsp_persistent_config.UpdateBackup, 2, NULL, PASSIVE_TYPE, 1),
+
 	//CPU speed (string: shows MHz)
-	/* 01 */ STRING_SELECTION_OPTION(NULL, NULL, &msg[FMT_OPTIONS_CPU_FREQUENCY], cpu_frequency_options,
-        &game_persistent_config.clock_speed_number, 6, NULL, PASSIVE_TYPE, 1),
+	/* 02 */ STRING_SELECTION_OPTION(NULL, NULL, &msg[FMT_OPTIONS_CPU_FREQUENCY], cpu_frequency_options,
+        &game_persistent_config.clock_speed_number, 6, NULL, PASSIVE_TYPE, 2),
 
-	/* 02 */ STRING_SELECTION_OPTION(language_set, NULL, &msg[FMT_OPTIONS_LANGUAGE], language_options,
-        &gpsp_persistent_config.language, sizeof(language_options) / sizeof(language_options[0]) /* number of possible languages */, NULL, ACTION_TYPE, 2),
+	/* 03 */ STRING_SELECTION_OPTION(language_set, NULL, &msg[FMT_OPTIONS_LANGUAGE], language_options,
+        &gpsp_persistent_config.language, sizeof(language_options) / sizeof(language_options[0]) /* number of possible languages */, NULL, ACTION_TYPE, 3),
 
 #ifdef ENABLE_FREE_SPACE
-	/* 03 */ STRING_SELECTION_OPTION(NULL, show_card_space, &msg[MSG_OPTIONS_CARD_CAPACITY], NULL,
-        &desert, 2, NULL, PASSIVE_TYPE | HIDEN_TYPE, 3),
+	/* 04 */ STRING_SELECTION_OPTION(NULL, show_card_space, &msg[MSG_OPTIONS_CARD_CAPACITY], NULL,
+        &desert, 2, NULL, PASSIVE_TYPE | HIDEN_TYPE, 4),
 #endif
 
-	/* 04 */ ACTION_OPTION(load_default_setting, NULL, &msg[MSG_OPTIONS_RESET], NULL,
-#ifdef ENABLE_FREE_SPACE
-			4
-#else
-			3
-#endif
-		),
-
-	/* 05 */ ACTION_OPTION(check_gbaemu_version, NULL, &msg[MSG_OPTIONS_VERSION], NULL,
+	/* 05 */ ACTION_OPTION(load_default_setting, NULL, &msg[MSG_OPTIONS_RESET], NULL,
 #ifdef ENABLE_FREE_SPACE
 			5
 #else
 			4
+#endif
+		),
+
+	/* 06 */ ACTION_OPTION(check_gbaemu_version, NULL, &msg[MSG_OPTIONS_VERSION], NULL,
+#ifdef ENABLE_FREE_SPACE
+			6
+#else
+			5
 #endif
 		),
 	};
@@ -4524,6 +4533,8 @@ u32 ReGBA_Menu(enum ReGBA_MenuEntryReason EntryReason)
 		ds2_setBacklight(3);
 		// also allow the user to press A for New Game right away
 		wait_Allkey_release(0);
+
+		update_backup_force();
 	}
 	else
 	{
@@ -5936,7 +5947,7 @@ int gui_init(u32 lang_id)
 
 	HighFrequencyCPU(); // Crank it up. When the menu starts, -> 0.
 
-    //Find the "TEMPGBA" system directory
+    //Find the "TEMPGBA-MOD" system directory
     DIR *current_dir;
 
     if(CheckLoad_Arg()){
@@ -5947,19 +5958,19 @@ int gui_init(u32 lang_id)
       char *endStr = strrchr(main_path, '/');
       *endStr = '\0';
 
-      //do a check to make sure the folder is a valid TempGBA folder
+      //do a check to make sure the folder is a valid TEMPGBA-MOD folder
       char tempPath[MAX_PATH];
       strcpy(tempPath, main_path);
       strcat(tempPath, "/system/gui");
       DIR *testDir = opendir(tempPath);
       if(!testDir)
         //not a valid TempGBA install
-        strcpy(main_path, "fat:/TEMPGBA");
+        strcpy(main_path, "fat:/TEMPGBA-MOD");
       else//test was successful, do nothing
         closedir(testDir);
     }
     else
-      strcpy(main_path, "fat:/TEMPGBA");
+      strcpy(main_path, "fat:/TEMPGBA-MOD");
 
 
 
@@ -5968,20 +5979,20 @@ int gui_init(u32 lang_id)
         closedir(current_dir);
     else
     {
-        strcpy(main_path, "fat:/_SYSTEM/PLUGINS/TEMPGBA");
+        strcpy(main_path, "fat:/_SYSTEM/PLUGINS/TEMPGBA-MOD");
         current_dir = opendir(main_path);
         if(current_dir)
             closedir(current_dir);
         else
         {
             strcpy(main_path, "fat:");
-            if(search_dir("TEMPGBA", main_path) == 0)
+            if(search_dir("TEMPGBA-MOD", main_path) == 0)
             {
-                printf("Found TEMPGBA directory\nDossier TEMPGBA trouve\n\n%s\n", main_path);
+                printf("Found TEMPGBA-MOD directory\nDossier TEMPGBA-MOD trouve\n\n%s\n", main_path);
             }
             else
             {
-				err_msg(DOWN_SCREEN, "/TEMPGBA: Directory missing\nPress any key to return to\nthe menu\n\n/TEMPGBA: Dossier manquant\nAppuyer sur une touche pour\nretourner au menu");
+				err_msg(DOWN_SCREEN, "/TEMPGBA-MOD: Directory missing\nPress any key to return to\nthe menu\n\n/TEMPGBA-MOD: Dossier manquant\nAppuyer sur une touche pour\nretourner au menu");
                 goto gui_init_err;
             }
         }
