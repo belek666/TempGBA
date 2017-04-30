@@ -21,6 +21,12 @@
 .set mips32r2
 #endif
 
+#ifdef _EE
+#define _SA 4
+#else
+#define _SA 1
+#endif
+
 .align 4
 
 .global mips_update_gba
@@ -256,7 +262,7 @@ mips_update_gba:
   sw $4, REG_PC($16)              # current PC = $4
   sw $0, CHANGED_PC_STATUS($16)
 
-  addiu $sp, $sp, -4              # make room on the stack
+  addiu $sp, $sp, -4 * _SA        # make room on the stack
   sw $ra,($sp)                    # save return address
 
   save_registers                  # save the registers
@@ -268,7 +274,7 @@ mips_update_gba:
   lw $1, CHANGED_PC_STATUS($16)   # load the new value 3 instructions early
 
   lw $ra, ($sp)                   # restore return address
-  addiu $sp, $sp, 4               # fix stack
+  addiu $sp, $sp, 4 * _SA         # fix stack
 
   bne $1, $0, lookup_pc_changed
   addu $17, $2, $0                # $17 = new cycle count (delay slot)
@@ -498,7 +504,7 @@ mips_indirect_branch_dual_no_update_gba:
   addiu $ra, $ra, -8              # rewind return address to function call
   sw $1, ($ra)                    # modify to call new handler
   
-  addiu $sp, $sp, -12             # adjust the stack to allow for a call
+  addiu $sp, $sp, -12 * _SA       # adjust the stack to allow for a call
   sw    $ra, 0($sp)               # save the return address (branch delay)
   sw    $4,  4($sp)
   sw    $5,  8($sp)
@@ -510,7 +516,7 @@ mips_indirect_branch_dual_no_update_gba:
   lw    $ra, 0($sp)
   lw    $4,  4($sp)
   lw    $5,  8($sp)
-  addiu $sp, $sp, 12              # adjust the stack back
+  addiu $sp, $sp, 12 * _SA        # adjust the stack back
 
 #ifdef PERFORMANCE_IMPACTING_STATISTICS
   la $1, Stats
@@ -567,7 +573,7 @@ mips_indirect_branch_dual_no_update_gba:
   addiu $ra, $ra, -8              # rewind return address to function call
   sw $1, ($ra)                    # modify to call new handler
 
-  addiu $sp, $sp, -12             # adjust the stack to allow for a call
+  addiu $sp, $sp, -12 * _SA       # adjust the stack to allow for a call
   sw    $ra, 0($sp)               # save the return address (branch delay)
   sw    $4,  4($sp)
   sw    $5,  8($sp)
@@ -579,7 +585,7 @@ mips_indirect_branch_dual_no_update_gba:
   lw    $ra, 0($sp)
   lw    $4,  4($sp)
   lw    $5,  8($sp)
-  addiu $sp, $sp, 12              # adjust the stack back
+  addiu $sp, $sp, 12 * _SA        # adjust the stack back
 
 #ifdef PERFORMANCE_IMPACTING_STATISTICS
   la $1, Stats
@@ -1415,7 +1421,7 @@ store_update_gba:
   lw $2, REG_CPSR($16)            # load CPSR
   sw $6, REG_PC($16)              # next PC = $6
 
-  addiu $sp, $sp, -4              # make room on the stack
+  addiu $sp, $sp, -4 * _SA        # make room on the stack
   sw $ra, ($sp)                   # save return address
 
   save_registers                  # save the registers
@@ -1427,7 +1433,7 @@ store_update_gba:
   lw $1, CHANGED_PC_STATUS($16)
 
   lw $ra, ($sp)                   # restore return address
-  addiu $sp, $sp, 4               # fix stack
+  addiu $sp, $sp, 4 * _SA         # fix stack
 
   bne $1, $0, lookup_pc_changed
   addu $17, $2, $0                # $17 = new cycle count (delay slot)
@@ -2645,7 +2651,7 @@ execute_load_bios_u32a:
   load_u32 bios_read_protect, -1
 
 2:
-  open_load32_a
+  open_load32_a patch_load_u32a
 
 execute_load_ewram_u32a:
   translate_region_ewram patch_load_u32a
@@ -2669,7 +2675,7 @@ execute_load_io_u32a:
   load_u32 io_registers, -1
 
 1:
-  open_load32_a
+  open_load32_a patch_load_u32a
 
 execute_load_palette_u32a:
   translate_region 5, patch_load_u32a, palette_ram, 0x3FF
@@ -2764,7 +2770,7 @@ execute_store_io_u8:
 
   sw $6, REG_PC($16)              # save the PC
 
-  addiu $sp, $sp, -4              # make room on the stack for $ra
+  addiu $sp, $sp, -4 * _SA        # make room on the stack for $ra
   sw $ra, ($sp)
 
   save_registers
@@ -2880,7 +2886,7 @@ execute_store_io_u16:
 
   sw $6, REG_PC($16)              # save the PC
 
-  addiu $sp, $sp, -4              # make room on the stack for $ra
+  addiu $sp, $sp, -4 * _SA        # make room on the stack for $ra
   sw $ra, ($sp)
 
   save_registers
@@ -2978,7 +2984,7 @@ execute_store_io_u32:
   andi $4, $4, 0x3FC              # wrap around/align address (delay)
   sw $6, REG_PC($16)              # save the PC
 
-  addiu $sp, $sp, -4              # make room on the stack for $ra
+  addiu $sp, $sp, -4 * _SA        # make room on the stack for $ra
   sw $ra, ($sp)
 
   save_registers
@@ -3178,7 +3184,7 @@ no_alert:
   lw $ra, ($sp)                   # restore return address
   restore_registers               # restore the registers
   jr $ra                          # return
-  addiu $sp, $sp, 4               # fix the stack (delay)
+  addiu $sp, $sp, 4 * _SA         # fix the stack (delay)
 
 io_alert:
   la $4, execute_cycles
@@ -3196,7 +3202,7 @@ io_alert:
   lw $1, CHANGED_PC_STATUS($16)
 
   lw $ra, ($sp)                   # restore return address
-  addiu $sp, $sp, 4               # fix the stack
+  addiu $sp, $sp, 4 * _SA         # fix the stack
 
   bne $1, $0, lookup_pc_changed
   addu $17, $2, $0                # $17 = new cycle count (delay)
@@ -3216,7 +3222,7 @@ io_update_gba:
   lw $1, CHANGED_PC_STATUS($16)
 
   lw $ra, ($sp)                   # restore return address
-  addiu $sp, $sp, 4               # fix the stack
+  addiu $sp, $sp, 4 * _SA         # fix the stack
 
   bne $1, $0, lookup_pc_changed
   addu $17, $2, $0                # $17 = new cycle count (delay)
@@ -3227,7 +3233,7 @@ io_update_gba:
 
 io_smc_write:
   blez $17, smc_write_update_gba  # if cycle counter <= 0
-  addiu $sp, $sp, 4               # fix the stack (delay)
+  addiu $sp, $sp, 4 * _SA         # fix the stack (delay)
 
   beq $2, $0, lookup_pc           # alert none
   nop
@@ -3365,7 +3371,7 @@ execute_swi:
   lui $1, %hi(SUPERVISOR_LR)
   sw $4, %lo(SUPERVISOR_LR)($1)   # store next PC in the supervisor's LR
 
-  addiu $sp, $sp, -4              # push $ra
+  addiu $sp, $sp, -4 * _SA        # push $ra
   sw $ra, ($sp)
 
   collapse_flags_body             # insert flag into $2
@@ -3389,7 +3395,7 @@ execute_swi:
   restore_registers
 
   jr $ra                          # return
-  addiu $sp, $sp, 4               # fix stack (delay slot)
+  addiu $sp, $sp, 4 * _SA         # fix stack (delay slot)
 
 
 # $4: pc to restore to
@@ -3500,7 +3506,7 @@ execute_store_cpsr:
   lw $2, REG_CPSR($16)            # $2 = current cpsr
   sw $6, REG_PC($16)              # current PC = $6
 
-  addiu $sp, $sp, -4
+  addiu $sp, $sp, -4 * _SA
   sw $ra, ($sp)
 
   andi $1, $2, 0x0F
@@ -3536,14 +3542,14 @@ execute_store_cpsr:
   addu $17, $2, $0                # $17 = new cycle count
 
   bnel $1, $0, lookup_pc_changed
-  addiu $sp, $sp, 4               # fix stack (delay Likely)
+  addiu $sp, $sp, 4 * _SA         # fix stack (delay Likely)
 
 2:
   lw $ra, ($sp)
   restore_registers               # restore the registers
 
   jr $ra
-  addiu $sp, $sp, 4
+  addiu $sp, $sp, 4 * _SA
 
 
 # $4: new spsr
@@ -3690,7 +3696,7 @@ execute_arm_translate:
   .end execute_arm_translate
 
 call_bios_hle:
-  addiu $sp, $sp, -4
+  addiu $sp, $sp, -4 * _SA
   sw $ra, ($sp)
   collapse_flags
   save_registers_0
@@ -3701,7 +3707,7 @@ call_bios_hle:
   restore_registers
 
   jr $ra
-  addiu $sp, $sp, 4               # branch delay
+  addiu $sp, $sp, 4 * _SA         # branch delay
 
 .bss
 

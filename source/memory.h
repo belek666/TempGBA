@@ -292,7 +292,7 @@ CPU_ALERT_TYPE dma_transfer(DmaTransferType *dma);
 s32 load_bios(char *name);
 u32 load_backup();
 
-ssize_t load_gamepak(char *file_path);
+size_t load_gamepak(char *file_path);
 u8 *load_gamepak_page(u16 physical_index);
 void init_memory();
 void init_gamepak_buffer();

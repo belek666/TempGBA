@@ -2509,14 +2509,14 @@ static void thumb_flag_status(BlockDataThumbType* block_data, u16 opcode)
  * them.)
  */
 
-#define block_lookup_translate(instruction_type, mem_type, metadata_area)     \
+#define block_lookup_translate(instruction_type, mem_type, metadata_area, num_redo) \
   block_tag = get_tag_##instruction_type();                                   \
   if((block_tag < MIN_TAG) || (block_tag > metadata_area##_max_tag))          \
   {                                                                           \
-    __label__ redo;                                                           \
+    __label__ redo##num_redo;                                                 \
     u8* translation_result;                                                   \
                                                                               \
-    redo:                                                                     \
+    redo##num_redo:                                                           \
     if (metadata_area##_block_tag_top > metadata_area##_max_tag)              \
     {                                                                         \
       clear_metadata_area(metadata_area##_metadata_area,                      \
@@ -2534,7 +2534,7 @@ static void thumb_flag_status(BlockDataThumbType* block_data, u16 opcode)
       if (translation_recursion_level != 0)                                   \
         return NULL;                                                          \
                                                                               \
-      goto redo;                                                              \
+      goto redo##num_redo;                                                    \
     }                                                                         \
                                                                               \
     block_address = translation_result + block_prologue_size;                 \
@@ -2558,14 +2558,14 @@ static void thumb_flag_status(BlockDataThumbType* block_data, u16 opcode)
  * we have to do it differently for the BIOS native code area. This can occur
  * in BIOS functions that loop.
  */
-#define block_lookup_translate_tagged_readonly(instruction_type, mem_type, metadata_area) \
+#define block_lookup_translate_tagged_readonly(instruction_type, mem_type, metadata_area, num_redo) \
   block_tag = get_tag_##instruction_type();                                   \
   if((block_tag < MIN_TAG) || (block_tag > metadata_area##_max_tag))          \
   {                                                                           \
-    __label__ redo;                                                           \
+    __label__ redo##num_redo;                                                 \
     u8* translation_result;                                                   \
                                                                               \
-    redo:                                                                     \
+    redo##num_redo:                                                           \
     if (metadata_area##_block_tag_top > metadata_area##_max_tag)              \
     {                                                                         \
       clear_metadata_area(metadata_area##_metadata_area, CLEAR_REASON_LAST_TAG); \
@@ -2586,7 +2586,7 @@ static void thumb_flag_status(BlockDataThumbType* block_data, u16 opcode)
       if (translation_recursion_level != 0)                                   \
         return NULL;                                                          \
                                                                               \
-      goto redo;                                                              \
+      goto redo##num_redo;                                                    \
     }                                                                         \
                                                                               \
                                                                               \
@@ -2639,19 +2639,19 @@ static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translati
   {                                                                           \
     case 0x00:                                                                \
       location = bios.metadata + (pc & 0x3FFC);                               \
-      block_lookup_translate_tagged_readonly(type, readonly, bios);           \
+      block_lookup_translate_tagged_readonly(type, readonly, bios, 1);        \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_READONLY);               \
       break;                                                                  \
                                                                               \
     case 0x02:                                                                \
       location = ewram_metadata + (pc & 0x3FFFC);                             \
-      block_lookup_translate(type, writable, ewram);                          \
+      block_lookup_translate(type, writable, ewram, 2);                       \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
     case 0x03:                                                                \
       location = iwram_metadata + (pc & 0x7FFC);                              \
-      block_lookup_translate(type, writable, iwram);                          \
+      block_lookup_translate(type, writable, iwram, 3);                       \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
@@ -2660,7 +2660,7 @@ static inline void AdjustTranslationBufferPeak(TRANSLATION_REGION_TYPE translati
         location = vram_metadata + (pc & 0x17FFC);                            \
       else                                                                    \
         location = vram_metadata + (pc & 0x0FFFC);                            \
-      block_lookup_translate(type, writable, vram);                           \
+      block_lookup_translate(type, writable, vram, 4);                        \
       AdjustTranslationBufferPeak(TRANSLATION_REGION_WRITABLE);               \
       break;                                                                  \
                                                                               \
@@ -2801,7 +2801,7 @@ u8 *block_lookup_address_dual(u32 pc)
                                                                               \
   block_end_pc += 4                                                           \
 
-#define arm_branch_target()                                                   \
+#define arm_branch_target(unused)                                             \
   branch_target = block_end_pc + 4 + ((s32)(opcode << 8) >> 6)                \
 
 // Contiguous conditional block flags modification - it will set 0x20 in the
@@ -2907,7 +2907,7 @@ u8 *block_lookup_address_dual(u32 pc)
                                                                               \
   block_end_pc += 2                                                           \
 
-#define thumb_branch_target()                                                 \
+#define thumb_branch_target(num_block)                                        \
   if(opcode < 0xDF00)                                                         \
   {                                                                           \
     branch_target = block_end_pc + 2 + ((s32)(opcode << 24) >> 23);           \
@@ -2928,7 +2928,7 @@ u8 *block_lookup_address_dual(u32 pc)
     }                                                                         \
     else                                                                      \
     {                                                                         \
-      goto no_direct_branch;                                                  \
+      goto no_direct_branch##num_block;                                       \
     }                                                                         \
   }                                                                           \
 
@@ -3149,7 +3149,7 @@ static s32 BinarySearch(u32 *Array, u32 Value, s32 Size)
     return -1;
 }
 
-#define scan_block(type, smc_write_op)                                        \
+#define scan_block(type, smc_write_op, num_block)                             \
 {                                                                             \
   u8 continue_block = 1;                                                      \
   u32 branch_targets_sorted[MAX_EXITS];                                       \
@@ -3169,8 +3169,8 @@ static s32 BinarySearch(u32 *Array, u32 Value, s32 Size)
       /* Branch/branch with link */                                           \
       if (type##_opcode_branch != 0)                                          \
       {                                                                       \
-        __label__ no_direct_branch;                                           \
-        type##_branch_target();                                               \
+        __label__ no_direct_branch##num_block;                                \
+        type##_branch_target(num_block);                                      \
         block_exits[block_exit_position].branch_target = branch_target;       \
         if (translation_region == TRANSLATION_REGION_READONLY)                \
         {                                                                     \
@@ -3182,7 +3182,7 @@ static s32 BinarySearch(u32 *Array, u32 Value, s32 Size)
                                                                               \
         /* Give the branch target macro somewhere to bail if it turns out to  \
            be an indirect branch (ala malformed Thumb bl) */                  \
-        no_direct_branch: __attribute__((unused));                            \
+        no_direct_branch##num_block: __attribute__((unused));                 \
       }                                                                       \
                                                                               \
       /* SWI branches to the BIOS, this will likely change when               \
@@ -3381,7 +3381,7 @@ u8* translate_block_##type(u32 pc)                                            \
    * for a translation gate to be placed at the end. */                       \
   if(translation_region == TRANSLATION_REGION_WRITABLE)                       \
   {                                                                           \
-    scan_block(type, yes);                                                    \
+    scan_block(type, yes, 1);                                                 \
                                                                               \
     /* Is a block with this checksum available? */                            \
     u16 checksum = block_checksum_##type(block_data_position);                \
@@ -3460,7 +3460,7 @@ u8* translate_block_##type(u32 pc)                                            \
   }                                                                           \
   else                                                                        \
   {                                                                           \
-    scan_block(type, no);                                                     \
+    scan_block(type, no, 2);                                                  \
   }                                                                           \
                                                                               \
   generate_block_prologue();                                                  \

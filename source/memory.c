@@ -301,7 +301,7 @@ static bool lookup_game_config(char *gamepak_title, char *gamepak_code, char *ga
 
 static void init_memory_gamepak(void);
 
-static s32 load_gamepak_raw(char *name);
+static ssize_t load_gamepak_raw(char *name);
 static u32 evict_gamepak_page(void);
 
 
@@ -2417,13 +2417,15 @@ CPU_ALERT_TYPE write_memory32(u32 address, u32 value)
 // 2N + 2(n-1)S + xI
 // 2I (normally), or 4I (if both source and destination are in gamepak memory area)
 
+extern u32 dma_cycle_count;
+
 #define COUNT_DMA_CYCLES()                                                    \
 {                                                                             \
   u8 *ws_n = memory_waitstate[0 + length_type];                               \
   u8 *ws_s = memory_waitstate[2 + length_type];                               \
   u8 src_region = src_ptr >> 24;                                              \
   u8 dest_region = dest_ptr >> 24;                                            \
-                                                                              \
+                                                                             \
   dma_cycle_count += ws_n[src_region] + ws_n[dest_region] + 2                 \
     + ((ws_s[src_region] + ws_s[dest_region] + 2) * (length - 1)) + 2;        \
 }                                                                             \
@@ -2665,7 +2667,7 @@ void init_memory(void)
 
   io_registers[REG_DISPCNT]   = 0x0080;
   io_registers[REG_DISPSTAT]  = 0x0000;
-  io_registers[REG_VCOUNT]    = gpsp_persistent_config.BootFromBIOS ? 0x0000 : 0x007e;
+  io_registers[REG_VCOUNT]    = ResolveSetting(BootFromBIOS, PerGameBootFromBIOS)/*gpsp_persistent_config.BootFromBIOS*/ ? 0x0000 : 0x007e;
   io_registers[REG_P1]        = 0x03FF;
   io_registers[REG_BG2PA]     = 0x0100;
   io_registers[REG_BG2PD]     = 0x0100;
@@ -3119,28 +3121,28 @@ static bool lookup_game_config(char *gamepak_title, char *gamepak_code, char *ga
 	char current_variable[256];
 	char current_value[256];
 
-	while(fgets(current_line, 256, config_file))
+	while(FILE_GETS(current_line, 256, config_file))
 	{
 		if(parse_config_line(current_line, current_variable, current_value) != -1)
 		{
 			if(strcasecmp(current_variable, "game_name") != 0 || strcasecmp(current_value, gamepak_title) != 0)
 				continue;
 
-			if(!fgets(current_line, 256, config_file) || (parse_config_line(current_line, current_variable, current_value) == -1) ||
+			if(!FILE_GETS(current_line, 256, config_file) || (parse_config_line(current_line, current_variable, current_value) == -1) ||
 			   strcasecmp(current_variable, "game_code") != 0 || strcasecmp(current_value, gamepak_code) != 0)
 				continue;
 
-			if(!fgets(current_line, 256, config_file) || (parse_config_line(current_line, current_variable, current_value) == -1) ||
+			if(!FILE_GETS(current_line, 256, config_file) || (parse_config_line(current_line, current_variable, current_value) == -1) ||
 			   strcasecmp(current_variable, "vender_code") != 0 || strcasecmp(current_value, gamepak_maker) != 0)
 				continue;
 
-			while(fgets(current_line, 256, config_file))
+			while(FILE_GETS(current_line, 256, config_file))
 			{
 				if(parse_config_line(current_line, current_variable, current_value) != -1)
 				{
 					if(!strcasecmp(current_variable, "game_name"))
 					{
-						fclose(config_file);
+						FILE_CLOSE(config_file);
 						return 0;
 					}
 
@@ -3221,7 +3223,7 @@ static ssize_t load_gamepak_raw(char *name_path)
  * Loads a GBA ROM from a file whose full path is in the first parameter.
  * Returns 0 on success and -1 on failure.
  */
-ssize_t load_gamepak(char *file_path)
+size_t load_gamepak(char *file_path)
 {
 	errno = 0;
 	u8 magicbit[4];
