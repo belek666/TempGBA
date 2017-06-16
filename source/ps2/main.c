@@ -220,7 +220,8 @@ int main(int argc, char *argv[])
 			else
 				ShowErrorScreen("Loading ROM failed: File format invalid");
 			
-			error_quit();
+			//error_quit();
+			goto loadrom;
 		}
 
 		if (IsGameLoaded)

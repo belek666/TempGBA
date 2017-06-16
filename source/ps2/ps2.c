@@ -11,6 +11,10 @@
 #include <sifrpc.h>
 #include <sys/fcntl.h>
 
+//#define DPRINTF(x...) sio_printf(x)
+#define DPRINTF(x...)
+//#define DEBUG
+
 static char padBuf_t[2][256] __attribute__((aligned(64)));
 
 extern unsigned char iomanX_irx_start[];
@@ -95,6 +99,7 @@ int ps2quit()
 int ps2init()
 {
    SifInitRpc(0);
+#ifndef DEBUG
    while(!SifIopReset(NULL, 0)){};
    while(!SifIopSync()){};
 
@@ -107,7 +112,7 @@ int ps2init()
 	SifInitRpc(0);
 	FlushCache(0);
 	FlushCache(2);
-    
+#endif
    sbv_patch_enable_lmb();          
    //sbv_patch_disable_prefix_check();
    
@@ -117,11 +122,12 @@ int ps2init()
 #ifndef HOST 
    fileXioInit();
 #endif
+
    //init_handles();
    initdirs();
    ps2time_init();
    ps2delay(2);
-   sio_printf("-- PS2 inited --\n");
+   DPRINTF("-- PS2 inited --\n");
    return 1;
 }
 
@@ -259,7 +265,7 @@ int ps2Dclose(int fd)
 
 #define MOUNT_LIMIT 4
 #define MAX_PARTITIONS 20
-#define MAX_NAME 255
+#define MAX_NAME 256
 
 static char partlist[MAX_PARTITIONS][MAX_NAME];
 static char mountedParty[MOUNT_LIMIT][MAX_NAME];
@@ -276,14 +282,14 @@ PS2DIR * ps2Opendir(char *path)
     int fd = -1;
 	PS2DIR *ptr;
 	
-	sio_printf("opendir %s\n", path);
+	DPRINTF("opendir %s\n", path);
     
     if(!strncmp(path, "MAIN", 4) || !strcmp(path, "hdd0:/"))
     goto end;
 	
 	fd = ps2Dopen(path);
 	
-	sio_printf("fd %d\n", fd);
+	DPRINTF("fd %d\n", fd);
 		
 	if(fd < 0)
 		return NULL;
@@ -307,7 +313,7 @@ int ps2Closedir(PS2DIR *d)
 	
 	if(d != NULL)
 	{
-		sio_printf("ps2dclose %d \n", d->d_fd);
+		DPRINTF("ps2dclose %d \n", d->d_fd);
 		
 		if(d->d_fd > 0)
 			ret = ps2Dclose(d->d_fd);
@@ -326,7 +332,7 @@ struct ps2dirent *ps2Readdir(PS2DIR *d)
 {   
     int ret;
 	
-	sio_printf("ps2readdir %s \n", d->d_name);
+	DPRINTF("ps2readdir %s \n", d->d_name);
 	
 	if(d->d_entry == NULL)
 	{
@@ -350,7 +356,7 @@ struct ps2dirent *ps2Readdir(PS2DIR *d)
               case 2:
                    sprintf(d->d_entry->d_name, "mass:/"); break;
               case 3:
-                   sprintf(d->d_entry->d_name, "hdd0:/"); break; 
+                   sprintf(d->d_entry->d_name, "hdd0:/"); break;
               default:
                       break;     
         }  
@@ -391,7 +397,7 @@ int ps2Chdir(char *path)
 {
     char *p;
 	
-    sio_printf("chdir %s mainPath %s\n", path, mainPath);
+    DPRINTF("chdir %s mainPath %s\n", path, mainPath);
     
     if((path == NULL) || !strncmp(path, "MAIN", 4))
     {
@@ -489,7 +495,7 @@ static int fix_hddpath(char *name)
 					sprintf(tmp, "pfs%d:/%s", i, p+1);
 					strcpy(name, tmp);
 					
-					sio_printf("%s\n", name);
+					DPRINTF("%s\n", name);
 					
 					return 1;
               }   
@@ -499,7 +505,7 @@ static int fix_hddpath(char *name)
 	 {
 		i = mountParty(name + 5);
 		
-		sio_printf("%s i = %d\n", name, i);
+		DPRINTF("%s i = %d\n", name, i);
 					
 		if(i == -1)
 		return 0;
@@ -584,8 +590,10 @@ static void load_hddmodules()
 	// -n 20 (cachesize 20) 
    static char hddarg[] = "-o" "\0" "4" "\0" "-n" "\0" "20";
  
+#ifndef DEBUG
     SifExecModuleBuffer(poweroff_irx_start, poweroff_irx_size, 0, NULL, NULL);
     SifExecModuleBuffer(ps2dev9_irx_start, ps2dev9_irx_size, 0, NULL, NULL);
+#endif
     SifExecModuleBuffer(ps2atad_irx_start, ps2atad_irx_size, 0, NULL, NULL);
 	SifExecModuleBuffer(ps2hdd_irx_start, ps2hdd_irx_size, sizeof(hddarg), hddarg, NULL);
 	SifExecModuleBuffer(ps2fs_irx_start, ps2fs_irx_size, sizeof(pfsarg), pfsarg, NULL);
@@ -595,22 +603,22 @@ static int hddinit()
 {
 	if(hddCheckPresent() < 0)
 	{
-		sio_printf("NO HDD FOUND!\n");
+		DPRINTF("NO HDD FOUND!\n");
     	return -1;
     }
 	else
 	{
-		sio_printf("Found HDD!\n");
+		DPRINTF("Found HDD!\n");
 	}
 
 	if(hddCheckFormatted() < 0)
     {
-		sio_printf("HDD Not Formatted!\n");
+		DPRINTF("HDD Not Formatted!\n");
 		return -1;	
 	}
     else
     {
-    	sio_printf("HDD Is Formatted!\n");
+    	DPRINTF("HDD Is Formatted!\n");
 	}
 
     
@@ -659,18 +667,23 @@ static int mountParty(char *party)
 	
 	sprintf(tmp, "hdd0:%s", party);
 	
+	DPRINTF("Mount %s as %s\n", tmp, pfs_str);
+	
 	if(fileXioMount(pfs_str, tmp, FIO_MT_RDWR) < 0)
 	{
+		DPRINTF("Mount failed 1\n");
 		for(i = 0; i <= MOUNT_LIMIT; i++)
 		{
 			if((i != latestMount) && (i != alwaysMounted))
 			{
+				DPRINTF("Mount try again %d\n", i);
 				unmountParty(i);
 				pfs_str[3] = '0' + i;
 				if(fileXioMount(pfs_str, tmp, FIO_MT_RDWR) >= 0)
 					break;
 			}
 		}
+		DPRINTF("Mount failed 2\n");
 		if(i > MOUNT_LIMIT)
 			return -1;
 	}
@@ -687,6 +700,8 @@ static void unmountParty(int party_ix)
 
 	strcpy(pfs_str, "pfs0:");
 	pfs_str[3] += party_ix;
+	
+	DPRINTF("Umount party %s\n", pfs_str);
 	
 	if(fileXioUmount(pfs_str) < 0)
 		return;
@@ -714,6 +729,7 @@ int check_dir(char *path, int is_main)
 	char *p;
 	
 	memset(tmp, 0, MAX_NAME);
+	//strcpy(tmp, path);
 	
 	if(!strncmp(path, "hdd0:", 5))
     {
@@ -751,13 +767,13 @@ int check_dir(char *path, int is_main)
 
 	if(fd > 0)
 	{
-		//sio_printf("close %s\n", path);
+		//DPRINTF("close %s\n", path);
 		ps2Dclose(fd);
 		
 		if((p=strrchr(path, '/'))!=NULL && *(p+1) == 0)
     		*p = 0;
 		
-		//sio_printf("argv %s\n", path);
+		//DPRINTF("argv %s\n", path);
 		
 		return 1;
 	}
@@ -789,9 +805,12 @@ int ps2GetMainPath(char *path, char *argv)
 	char *p;
 	
 	memset(current_str , 0, MAX_NAME);
-	strcpy(current_str, argv);
 	
-	sio_printf("argv %s\n", argv);
+	if(argv != NULL)
+	{
+		strcpy(current_str, argv);
+		DPRINTF("argv %s\n", argv);
+	}
 	
 	FILE_OPEN(cfg_file, cnf_path_mc, READ);
 	
@@ -802,9 +821,9 @@ int ps2GetMainPath(char *path, char *argv)
 		FILE_CLOSE(cfg_file);
 		
 		strcpy(path, current_line);
-		
-		sio_printf("argv %s\n", path);
-		
+
+		DPRINTF("cnf_path %s\n", path);
+
 		if(check_dir(path, 1))
 			return 1;
 	}
@@ -844,7 +863,7 @@ int ps2GetMainPath(char *path, char *argv)
 			return 0;
 	}
 	
-	sio_printf("argv %s\n", path);
+	DPRINTF("argv %s\n", path);
 	
 	return check_dir(path, 1);
 }

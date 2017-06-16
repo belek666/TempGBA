@@ -50,9 +50,14 @@ void ReGBA_Trace(const char* Format, ...)
 
 void ReGBA_BadJump(u32 SourcePC, u32 TargetPC)
 {
-	printf("GBA segmentation fault");
-	printf("The game tried to jump from %08X to %08X", SourcePC, TargetPC);
-	exit(1);
+	//printf("GBA segmentation fault");
+	//printf("The game tried to jump from %08X to %08X", SourcePC, TargetPC);
+	
+	ShowErrorScreen("GBA segmentation fault"
+	"\nThe game tried to jump from %08X to %08X", SourcePC, TargetPC);
+	
+	//exit(1);
+	error_quit();
 }
 
 void ReGBA_MaxBlockExitsReached(u32 BlockStartPC, u32 BlockEndPC, u32 Exits)

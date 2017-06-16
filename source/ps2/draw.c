@@ -83,16 +83,16 @@ u8 menu_res = 0;
 
 void memset64( void * dest, uint64_t value, uintptr_t size )
 {
-  uintptr_t i;
+	uintptr_t i;
   
-  for(i = 0; i < (size & (~7)); i+=8 )
-  {
-	memcpy( ((char*)dest) + i, &value, 8 );
-  }  
-  for( ; i < size; i++ )
-  {
-    ((char*)dest)[i] = ((char*)&value)[i&7];
-  }  
+	for(i = 0; i < (size & (~7)); i+=8 )
+	{
+		memcpy( ((char*)dest) + i, &value, 8 );
+	}  
+	for( ; i < size; i++ )
+	{
+		((char*)dest)[i] = ((char*)&value)[i&7];
+	}  
 }
 
 void clear_screen(uint16_t color)
@@ -278,12 +278,12 @@ void gsTex(int width, int height, GSTEXTURE *gsTex)
 	if((gsGlobal->Interlace == GS_INTERLACED) && (gsGlobal->Field == GS_FRAME))
 		y_fix = 0.5f;
 	
-	w_ratio = (float)gsGlobal->Width / (float)gsTexture.Width;
-	h_ratio = (float)(gsGlobal->Height / y_fix) / (float)gsTexture.Height;
+	w_ratio = (float)gsGlobal->Width / (float)gsTex->Width;
+	h_ratio = (float)(gsGlobal->Height / y_fix) / (float)gsTex->Height;
 	ratio = (w_ratio <= h_ratio) ? w_ratio : h_ratio;
 	
-	center_x = ((float)gsGlobal->Width - ((float)gsTexture.Width * ratio)) / 2;
-	center_y = ((float)(gsGlobal->Height / y_fix) - ((float)gsTexture.Height * ratio)) / 2;
+	center_x = ((float)gsGlobal->Width - ((float)gsTex->Width * ratio)) / 2;
+	center_y = ((float)(gsGlobal->Height / y_fix) - ((float)gsTex->Height * ratio)) / 2;
 	
 	video_ratio_type ResolvedScreenRatio = ResolveSetting(ScreenRatio, PerGameScreenRatio);
 	if(ResolvedScreenRatio == fullscreen || menu_res)
@@ -295,8 +295,8 @@ void gsTex(int width, int height, GSTEXTURE *gsTex)
 	}
 	else
 	{
-		x2 = (float)gsTexture.Width * ratio + center_x;
-		y2 = (float)gsTexture.Height * y_fix * ratio + center_y;
+		x2 = (float)gsTex->Width * ratio + center_x;
+		y2 = (float)gsTex->Height * y_fix * ratio + center_y;
 	}
 	
 	if(OldScreenRatio != ResolvedScreenRatio)
