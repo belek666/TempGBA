@@ -29,6 +29,7 @@ typedef struct timespec timespec;
 
 int errno;
 
+#include <sys/types.h>
 #include <osd_config.h>
 #include <debug.h>
 #include <gsKit.h>
@@ -71,7 +72,7 @@ struct timespec {
   filename_tag = fioOpen(filename, FILE_OPEN_##mode)                        \
 
 #define FILE_CHECK_VALID(filename_tag)                                      \
-  (filename_tag > 0)                                        \
+  (filename_tag > 0)                                        				\
 
 #define FILE_CLOSE(filename_tag)                                            \
   fioClose(filename_tag)                                                    \
@@ -94,7 +95,7 @@ struct timespec {
   filename_tag = fileXioOpen(filename, FILE_OPEN_##mode, fileXio_mode)      \
 
 #define FILE_CHECK_VALID(filename_tag)                                      \
-  (filename_tag > 0)                                        \
+  (filename_tag > 0)                                        				\
 
 #define FILE_CLOSE(filename_tag)                                            \
   fileXioClose(filename_tag)                                                \
@@ -114,9 +115,9 @@ struct timespec {
 #endif
 
 #define FILE_TAG_INVALID                                                    \
-  (-1)                                                                    \
+  (-1)                                                                      \
 
-#define FILE_GETS(str, size, filename_tag)                                      \
+#define FILE_GETS(str, size, filename_tag)                                  \
   ps2fgets(str, size, filename_tag)                                         \
 
 #include "ps2input.h"

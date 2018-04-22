@@ -17,38 +17,41 @@
 
 static char padBuf_t[2][256] __attribute__((aligned(64)));
 
-extern unsigned char iomanX_irx_start[];
-extern unsigned int iomanX_irx_size;
+extern u8 iomanX_irx[];
+extern int size_iomanX_irx;
 
-extern unsigned char usbhdfsd_irx_start[];
-extern unsigned int usbhdfsd_irx_size;
+extern u8 usbhdfsd_irx[];
+extern int size_usbhdfsd_irx;
 
-extern unsigned char usbd_irx_start[];
-extern unsigned int usbd_irx_size;
+extern u8 usbd_irx[];
+extern int size_usbd_irx;
 
-extern unsigned char freesd_irx_start[];
-extern unsigned int freesd_irx_size;
+extern u8 freesd_irx[];
+extern int size_freesd_irx;
 
-extern unsigned char audsrv_irx_start[];
-extern unsigned int audsrv_irx_size;
+extern u8 audsrv_irx[];
+extern int size_audsrv_irx;
 
-extern unsigned char fileXio_irx_start[];
-extern unsigned int fileXio_irx_size;
+extern u8 fileXio_irx[];
+extern int size_fileXio_irx;
 
-extern unsigned char ps2atad_irx_start[];
-extern unsigned int ps2atad_irx_size;
+extern u8 ps2atad_irx[];
+extern int size_ps2atad_irx;
 
-extern unsigned char ps2fs_irx_start[];
-extern unsigned int ps2fs_irx_size;
+extern u8 ps2fs_irx[];
+extern int size_ps2fs_irx;
 
-extern unsigned char ps2hdd_irx_start[];
-extern unsigned int ps2hdd_irx_size;
+extern u8 ps2hdd_irx[];
+extern int size_ps2hdd_irx;
 
-extern unsigned char ps2dev9_irx_start[];
-extern unsigned int ps2dev9_irx_size;
+extern u8 ps2dev9_irx[];
+extern int size_ps2dev9_irx;
 
-extern unsigned char poweroff_irx_start[];
-extern unsigned int poweroff_irx_size;
+extern u8 poweroff_irx[];
+extern int size_poweroff_irx;
+
+extern u8 smscdvd_irx[];
+extern int size_smscdvd_irx;
 
 static int initdirs();
 static int get_part_list();
@@ -66,14 +69,13 @@ static void load_modules()
 	SifLoadModule("rom0:MCSERV", 0, NULL);
 	SifLoadModule("rom0:PADMAN", 0, NULL);
 	
-	SifExecModuleBuffer(iomanX_irx_start, iomanX_irx_size, 0, NULL, NULL);
-	SifExecModuleBuffer(fileXio_irx_start, fileXio_irx_size, 0, NULL, NULL);
-          
-	SifExecModuleBuffer(usbd_irx_start, usbd_irx_size, 0, NULL, NULL);
-	SifExecModuleBuffer(usbhdfsd_irx_start, usbhdfsd_irx_size, 0, NULL, NULL);      
-
-	SifExecModuleBuffer(freesd_irx_start, freesd_irx_size, 0, NULL, NULL);
-	SifExecModuleBuffer(audsrv_irx_start, audsrv_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(iomanX_irx, size_iomanX_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(fileXio_irx, size_fileXio_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(smscdvd_irx, size_smscdvd_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(usbd_irx, size_usbd_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(usbhdfsd_irx, size_usbhdfsd_irx, 0, NULL, NULL);      
+	SifExecModuleBuffer(freesd_irx, size_freesd_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(audsrv_irx, size_audsrv_irx, 0, NULL, NULL);
 }
 
 void ps2delay(int count) 
@@ -341,7 +343,7 @@ struct ps2dirent *ps2Readdir(PS2DIR *d)
 
 	if(!strncmp(d->d_name, "MAIN", 4))
     {
-        if(dir_ctr > 3)
+        if(dir_ctr > 4)
         {
             dir_ctr = 0;
             return NULL;      
@@ -356,6 +358,8 @@ struct ps2dirent *ps2Readdir(PS2DIR *d)
               case 2:
                    sprintf(d->d_entry->d_name, "mass:/"); break;
               case 3:
+                   sprintf(d->d_entry->d_name, "cdfs:/"); break;
+              case 4:
                    sprintf(d->d_entry->d_name, "hdd0:/"); break;
               default:
                       break;     
@@ -591,12 +595,12 @@ static void load_hddmodules()
    static char hddarg[] = "-o" "\0" "4" "\0" "-n" "\0" "20";
  
 #ifndef DEBUG
-    SifExecModuleBuffer(poweroff_irx_start, poweroff_irx_size, 0, NULL, NULL);
-    SifExecModuleBuffer(ps2dev9_irx_start, ps2dev9_irx_size, 0, NULL, NULL);
+    SifExecModuleBuffer(poweroff_irx, size_poweroff_irx, 0, NULL, NULL);
+    SifExecModuleBuffer(ps2dev9_irx, size_ps2dev9_irx, 0, NULL, NULL);
 #endif
-    SifExecModuleBuffer(ps2atad_irx_start, ps2atad_irx_size, 0, NULL, NULL);
-	SifExecModuleBuffer(ps2hdd_irx_start, ps2hdd_irx_size, sizeof(hddarg), hddarg, NULL);
-	SifExecModuleBuffer(ps2fs_irx_start, ps2fs_irx_size, sizeof(pfsarg), pfsarg, NULL);
+    SifExecModuleBuffer(ps2atad_irx, size_ps2atad_irx, 0, NULL, NULL);
+	SifExecModuleBuffer(ps2hdd_irx, size_ps2hdd_irx, sizeof(hddarg), hddarg, NULL);
+	SifExecModuleBuffer(ps2fs_irx, size_ps2fs_irx, sizeof(pfsarg), pfsarg, NULL);
 }
 
 static int hddinit()
@@ -765,6 +769,8 @@ int check_dir(char *path, int is_main)
 	
 	fd = ps2Dopen(path);
 
+	DPRINTF("dopen %s fd %d\n", path, fd);
+
 	if(fd > 0)
 	{
 		//DPRINTF("close %s\n", path);
@@ -803,23 +809,28 @@ int ps2GetMainPath(char *path, char *argv)
 	char current_line[MAX_NAME];
 	char current_str[MAX_NAME];
 	char *p;
-	
+	int i;
+
 	memset(current_str , 0, MAX_NAME);
-	
+
 	if(argv != NULL)
 	{
 		strcpy(current_str, argv);
 		DPRINTF("argv %s\n", argv);
 	}
-	
+
 	FILE_OPEN(cfg_file, cnf_path_mc, READ);
 	
 	if(FILE_CHECK_VALID(cfg_file))
 	{
 		ps2fgets(current_line, 256, cfg_file);
-		
+
 		FILE_CLOSE(cfg_file);
-		
+
+		for(i = 0; i < strlen(current_line); i++)
+			if(current_line[i] == '\r' || current_line[i] == '\n')
+				current_line[i] = 0;
+
 		strcpy(path, current_line);
 
 		DPRINTF("cnf_path %s\n", path);
@@ -846,6 +857,12 @@ int ps2GetMainPath(char *path, char *argv)
 		}
 		else
 			return 0; 
+	}
+	else if(!strncmp(argv, "cdfs:", 5) || !strncmp(argv, "cdrom", 5))
+	{
+		mkdir("mc0:/PS2GBA");
+		mkdir("mc0:/PS2GBA/TEMPGBA");
+		strcpy(path, "mc0:/PS2GBA/TEMPGBA");
 	}
 	else
 	{

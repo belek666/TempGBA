@@ -77,6 +77,10 @@ extern uint32_t ScreenPosY;
 
 extern uint32_t CurrentScreenPosX;
 extern uint32_t CurrentScreenPosY;
+extern uint32_t ScreenOverscanX;
+extern uint32_t CurrentScreenOverscanX;
+extern uint32_t ScreenOverscanY;
+extern uint32_t CurrentScreenOverscanY;
 
 void init_video();
 void calibrate_screen_pos();

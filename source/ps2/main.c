@@ -21,6 +21,11 @@
 #include <sys/time.h>
 #include <stdlib.h>
 
+extern u8 gba_bios_bin[];
+extern int size_gba_bios_bin;
+
+s32 load_bios_mem(u8* data, int size);
+
 TimerType timer[4];
 
 frameskip_type current_frameskip_type = auto_frameskip;
@@ -188,14 +193,16 @@ int main(int argc, char *argv[])
 	
 	if(load_bios(file) == -1)
 	{
-		ReGBA_ProgressUpdate(2, 2);
+		printf("No GBA BIOS was found.\n");
+		/*ReGBA_ProgressUpdate(2, 2);
 		ReGBA_ProgressFinalise();
 
 		ShowErrorScreen("The GBA BIOS was not found in location: "
 			"\n%s\n The file needs "
 			"to be named gba_bios.bin.", main_path);
 
-		error_quit();
+		error_quit();*/
+		load_bios_mem(gba_bios_bin, size_gba_bios_bin);
 	}
 	else
 	{
@@ -228,6 +235,9 @@ int main(int argc, char *argv[])
 		{
 			char FileNameNoExt[MAX_PATH + 1];
 			GetFileNameNoExtension(FileNameNoExt, CurrentGamePath);
+#ifdef CHEATS
+			add_cheats(FileNameNoExt);
+#endif
 			ReGBA_LoadSettings(FileNameNoExt, true);
 		}
 
@@ -242,8 +252,8 @@ loadrom:
 	
 		if(load_file(file_ext, load_filename) == -1)
 		{
-		if(ReGBA_Menu(REGBA_MENU_ENTRY_REASON_NO_ROM))
-		goto loadrom;
+			if(ReGBA_Menu(REGBA_MENU_ENTRY_REASON_NO_ROM))
+				goto loadrom;
 		}
 		else
 		{
@@ -252,6 +262,16 @@ loadrom:
 				ShowErrorScreen("Failed to load gamepak %s, exiting.\n", load_filename);
 				ps2delay(5);
 				goto loadrom;
+			}
+
+			if (IsGameLoaded)
+			{
+				char FileNameNoExt[MAX_PATH + 1];
+				GetFileNameNoExtension(FileNameNoExt, CurrentGamePath);
+#ifdef CHEATS
+				add_cheats(FileNameNoExt);
+#endif
+				ReGBA_LoadSettings(FileNameNoExt, true);
 			}
 
 			init_cpu(ResolveSetting(BootFromBIOS, PerGameBootFromBIOS) /* in port.c */);
@@ -415,7 +435,7 @@ u32 update_gba()
 					// Transition from vblank to next screen
 					dispstat &= ~0x01;
 					frame_ticks++;
-#if 0
+#ifdef CHEATS
 					process_cheats();
 #endif
 					update_backup();

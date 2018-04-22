@@ -3351,6 +3351,16 @@ s32 load_bios(char *name)
 	return -1;
 }
 
+s32 load_bios_mem(u8* data, int size)
+{
+	if (data) {
+		memcpy(bios.rom, data, 0x4000);
+		IsNintendoBIOS = false;
+		return 0;
+	}
+	return -1;
+}
+
 // type = read_mem / write_mem
 #define savestate_block(type)                                                 \
   cpu_##type##_savestate();                                                   \

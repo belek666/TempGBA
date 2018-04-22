@@ -164,6 +164,9 @@ const char* GetFileName(const char* Path)
 	const char* Result = strrchr(Path, '/');
 	if (Result)
 		return Result + 1;
+	Result = strrchr(Path, ':');
+	if (Result)
+		return Result + 1;
 	return Path;
 }
 

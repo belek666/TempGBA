@@ -60,6 +60,11 @@ uint32_t ScreenPosY = 0;
 uint32_t CurrentScreenPosX = 0;
 uint32_t CurrentScreenPosY = 0;
 
+uint32_t ScreenOverscanX = 99;
+uint32_t CurrentScreenOverscanX = 99;
+uint32_t ScreenOverscanY = 99;
+uint32_t CurrentScreenOverscanY = 99;
+
 #define COLOR_PROGRESS_BACKGROUND   RGB888_TO_RGB565(  0,   0,   0)
 #define COLOR_PROGRESS_TEXT_CONTENT RGB888_TO_RGB565(255, 255, 255)
 #define COLOR_PROGRESS_TEXT_OUTLINE RGB888_TO_RGB565(  0,   0,   0)
@@ -178,21 +183,27 @@ void gsReload()
 			gsGlobal->Mode = GS_MODE_PAL;
 			gsGlobal->Interlace = GS_INTERLACED;
 			gsGlobal->Field = GS_FIELD;
-			gsGlobal->Width = 640;
-			gsGlobal->Height = 512;
+			//gsGlobal->Width = 640;
+			//gsGlobal->Height = 512;
+			gsGlobal->Width = 704;
+			gsGlobal->Height = 576;
 			break;
 		case ntsc:
 			gsGlobal->Mode = GS_MODE_NTSC;
 			gsGlobal->Interlace = GS_INTERLACED;
 			gsGlobal->Field = GS_FIELD;
-			gsGlobal->Width = 640;
-			gsGlobal->Height = 448;
+			//gsGlobal->Width = 640;
+			//gsGlobal->Height = 448;
+			gsGlobal->Width = 704;
+			gsGlobal->Height = 480;
 			break;
 		case dtv_480p:
 			gsGlobal->Mode = GS_MODE_DTV_480P;
 			gsGlobal->Interlace = GS_NONINTERLACED;
 			gsGlobal->Field = GS_FRAME;
-			gsGlobal->Width = 640;
+			//gsGlobal->Width = 640;
+			//gsGlobal->Height = 480;
+			gsGlobal->Width = 704;
 			gsGlobal->Height = 480;
 			break;
 		case dtv_720p:
@@ -247,12 +258,13 @@ void gsDeinit()
 	gsKit_vram_clear(gsGlobal);
 }
 
-static float center_x, center_y, x2, y2;
+static float gsx1, gsy1, gsx2, gsy2, y_fix;
 
 void gsTex(int width, int height, GSTEXTURE *gsTex)
 {
-    int size;
-    float ratio, w_ratio, h_ratio, y_fix = 1.0f;
+    float ratio, w_ratio, h_ratio;
+	
+	y_fix = 1.0f;
 
     gsTex->Height = height;
     gsTex->Width = width;
@@ -264,15 +276,14 @@ void gsTex(int width, int height, GSTEXTURE *gsTex)
 	else
 		gsTex->Filter = GS_FILTER_LINEAR;
     
-	size = gsKit_texture_size(gsTex->Width, gsTex->Height, gsTex->PSM);
+	/*size = gsKit_texture_size(gsTex->Width, gsTex->Height, gsTex->PSM);
     
 	if(gsTex->Mem == NULL)
 	{
     	gsTex->Mem = memalign(128, size);
     	gsTex->Vram = gsKit_vram_alloc(gsGlobal, size, GSKIT_ALLOC_USERBUFFER);
-	}
-    
-    memset(gsTex->Mem, 0, size);
+	}*/
+
 	gsKit_setup_tbw(gsTex);
 	
 	if((gsGlobal->Interlace == GS_INTERLACED) && (gsGlobal->Field == GS_FRAME))
@@ -282,21 +293,21 @@ void gsTex(int width, int height, GSTEXTURE *gsTex)
 	h_ratio = (float)(gsGlobal->Height / y_fix) / (float)gsTex->Height;
 	ratio = (w_ratio <= h_ratio) ? w_ratio : h_ratio;
 	
-	center_x = ((float)gsGlobal->Width - ((float)gsTex->Width * ratio)) / 2;
-	center_y = ((float)(gsGlobal->Height / y_fix) - ((float)gsTex->Height * ratio)) / 2;
+	gsx1 = ((float)gsGlobal->Width - ((float)gsTex->Width * ratio)) / 2;
+	gsy1 = ((float)(gsGlobal->Height / y_fix) - ((float)gsTex->Height * ratio)) / 2;
 	
 	video_ratio_type ResolvedScreenRatio = ResolveSetting(ScreenRatio, PerGameScreenRatio);
 	if(ResolvedScreenRatio == fullscreen || menu_res)
 	{
-		x2 = (float)gsGlobal->Width;
-		y2 = (float)gsGlobal->Height;
-		center_x = 0.0f;
-		center_y = 0.0f;
+		gsx1 = 0.0f;
+		gsy1 = 0.0f;
+		gsx2 = (float)gsGlobal->Width - 0.9375f;
+		gsy2 = (float)gsGlobal->Height - 0.9375f;
 	}
 	else
 	{
-		x2 = (float)gsTex->Width * ratio + center_x;
-		y2 = (float)gsTex->Height * y_fix * ratio + center_y;
+		gsx2 = (float)gsTex->Width * ratio + gsx1 - 0.9375f;
+		gsy2 = (float)gsTex->Height * y_fix * ratio + gsy1 - 0.9375f;
 	}
 	
 	if(OldScreenRatio != ResolvedScreenRatio)
@@ -307,13 +318,24 @@ void gsTex(int width, int height, GSTEXTURE *gsTex)
 
 void ReGBA_VideoFlip()
 {
+	float overscanX = ResolveSetting(ScreenOverscanX, 0);
+	float overscanY = ResolveSetting(ScreenOverscanY, 0);
+	overscanX -= 99;
+	overscanY -= 99;
+	
+	if (ScreenOverscanX != CurrentScreenOverscanX || ScreenOverscanY != CurrentScreenOverscanY) {
+		CurrentScreenOverscanX = ScreenOverscanX;
+		CurrentScreenOverscanY = ScreenOverscanY;
+		gsKit_clear(gsGlobal, Black);
+	}
+	
 	SyncDCache(gsTexture.Mem, (void*)((unsigned int)gsTexture.Mem+gsKit_texture_size_ee(gsTexture.Width, gsTexture.Height, gsTexture.PSM)));
 	gsKit_texture_send_inline(gsGlobal, gsTexture.Mem, gsTexture.Width, gsTexture.Height, gsTexture.Vram, gsTexture.PSM, gsTexture.TBW, GS_CLUT_NONE);
 
-	gsKit_prim_sprite_texture(gsGlobal, &gsTexture, center_x, center_y, // x1,y1
-								0, 0, // u1,v1
-						    	x2, y2, //x2,y2
-						    	gsTexture.Width, gsTexture.Height, //u2, v2
+	gsKit_prim_sprite_texture(gsGlobal, &gsTexture, gsx1 + overscanX, gsy1 + overscanY * y_fix, // x1,y1
+								0.5f, 0.5f, // u1,v1
+						    	gsx2 - overscanX, gsy2 - overscanY * y_fix, //x2,y2
+						    	gsTexture.Width - 0.375f, gsTexture.Height - 0.375f, //u2, v2
 						    	1.0f, TEXTURE_RGBAQ);
 	
 	gsKit_sync_flip(gsGlobal);
@@ -340,6 +362,10 @@ void init_video()
 	
 	gsTex(GBA_SCREEN_WIDTH * 3, GBA_SCREEN_HEIGHT * 3, &gsTexture);
 	
+	int size = gsKit_texture_size(gsTexture.Width, gsTexture.Height, gsTexture.PSM);
+	gsTexture.Mem = memalign(128, size);
+    gsTexture.Vram = gsKit_vram_alloc(gsGlobal, size, GSKIT_ALLOC_USERBUFFER);
+	
 	GBAScreen = _GBAScreen;
 }
 
@@ -349,6 +375,10 @@ void reload_video()
 	gsReload();
 
 	gsTex(GBA_SCREEN_WIDTH * 3, GBA_SCREEN_HEIGHT * 3, &gsTexture);
+	
+	int size = gsKit_texture_size(gsTexture.Width, gsTexture.Height, gsTexture.PSM);
+	//gsTexture.Mem = memalign(128, size);
+    gsTexture.Vram = gsKit_vram_alloc(gsGlobal, size, GSKIT_ALLOC_USERBUFFER);
 	
 	GBAScreen = _GBAScreen;
 	
